@@ -1,6 +1,6 @@
 interface:
   display_name: "iOS A面审核检查"
   short_description: "只读检查 iOS A 面内购、隐私清单、权限与上架风险"
-  default_prompt: "使用 $ios-aside-review 对这个 iOS A 面项目执行只读审核，默认只生成包含全部检查项和四态结论的 A4 PDF 报告；Push 只检查权限配置，ATT 只检查权限配置与用途文案。生成前使用已安装的 PDF 技能，缺少时先安装。"
+  default_prompt: "使用 $ios-aside-review 对这个 iOS A 面项目执行只读审核，先运行 scripts/update_skill.py --check 检查 GitHub 最新正式版本；更新后重读 SKILL.md 再执行，检查失败则停止。默认只生成包含全部检查项和四态结论的 A4 PDF 报告；Push 只检查权限配置，ATT 只检查权限配置与用途文案。生成前使用已安装的 PDF 技能，缺少时先安装。"
 policy:
   allow_implicit_invocation: true

@@ -11,12 +11,19 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Sequence
+
+
+try:
+    from .update_skill import UpdateError, ensure_latest
+except ImportError:
+    from update_skill import UpdateError, ensure_latest
 
 
 DEFAULT_POLICY: dict[str, Any] = {
@@ -1896,6 +1903,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not root.is_dir():
         print(f"项目目录不存在：{root}", file=sys.stderr)
         return 2
+    skill_root = Path(__file__).resolve().parents[1]
+    invocation_cwd = Path.cwd()
+    try:
+        updated = ensure_latest(skill_root)
+    except UpdateError as error:
+        print(f"技能版本检查失败，未执行审计：{error}", file=sys.stderr)
+        return 2
+    if updated:
+        # Run a fresh interpreter so neither scanner nor renderer code comes from the old release.
+        print("技能已更新，正在使用新版本重新执行审计。", flush=True)
+        return subprocess.call(
+            [sys.executable, str(skill_root / "scripts" / "audit_ios_a_side.py"),
+             *(list(argv) if argv is not None else sys.argv[1:])],
+            cwd=str(invocation_cwd),
+        )
     try:
         policy = load_policy(args.config.expanduser().resolve() if args.config else None)
         auditor = Auditor(root, policy).run()

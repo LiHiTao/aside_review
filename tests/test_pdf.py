@@ -43,6 +43,12 @@ def sample_report() -> dict:
 
 
 class PdfTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # PDF tests exercise rendering only; updater behavior is covered separately.
+        updater = patch("scripts.audit_ios_a_side.ensure_latest", return_value=False)
+        updater.start()
+        self.addCleanup(updater.stop)
+
     def test_preflight_reports_missing_reportlab(self) -> None:
         real_import = builtins.__import__
 
