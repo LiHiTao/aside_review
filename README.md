@@ -1,4 +1,6 @@
-# iOS A 面审核技能
+# aside_review
+
+iOS A 面审核技能
 
 版本：**1.0.0**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
 
