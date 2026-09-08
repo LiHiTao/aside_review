@@ -2,7 +2,7 @@
 
 iOS A 面审核技能
 
-版本：**1.0.0**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
+版本：**1.0.1**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
 
 ## 安装
 
@@ -34,6 +34,8 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 
 - 档位按商品列表原有价格顺序，从默认 $0.99 起递增判断，不要求名称或商品 ID 包含序号。
 - 存在非空应用描述文案即通过描述检查，不要求包含内购用语。
+- Restore 按实际代码/操作入口检查，协议中“不提供恢复购买”的说明不会因关键词误报。
+- LaunchScreen 支持新版 Xcode 文件夹同步，核对对应 target、同步目录与排除名单。
 - 静态通过不代表购买、交易验证或真机布局已经通过，也不保证 Apple 审核结果。
 
 ## 开发与发布

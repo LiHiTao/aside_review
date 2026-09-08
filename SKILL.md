@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-初始版本为 `1.0.0`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.0.1`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -89,6 +89,12 @@ python3 scripts/audit_ios_a_side.py ./path/to/project \
 商品 ID 必须有商品语义证据；不得仅因普通 `id` 含点号、价格字样或类似商品的命名就计入内购。通知、任务、路由等业务 ID 不参与商品数量、一致性和大小写统计。Swift 字符串插值或拼接不能截取为商品字面量；确属动态内购但无法解析时保留 `NOT_VERIFIABLE`。具体识别边界见规则参考。
 
 IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或非布尔值时判定 `FAIL`；字段缺失时判定 `NOT_VERIFIABLE`，不得把缺少提交证据自动视为通过。
+
+## Restore 与 LaunchScreen 证据边界
+
+- Restore（IAP-009）检查实际恢复购买代码或操作入口，不因协议、帮助说明或源码中的协议字符串提到 `Restore Purchases` 就判失败。诸如“不提供恢复购买 / does not provide Restore Purchases”只属于说明文案；同一文件或同一行存在真实恢复调用时仍须失败。`AppStore.sync()`、StoreKit 恢复交易调用及明确恢复购买按钮属于功能证据；普通数据备份恢复、交易监听和 `finish()` 不属于恢复购买。
+- LaunchScreen（IOS-001）兼容 `PBXFileSystemSynchronizedRootGroup`。配置名称、磁盘文件、同步目录到对应 target 的关联及该 target 的例外名单均可解析，且文件未被排除时，静态判定为 `PASS`。不要求逐文件 `PBXFileReference` 或 Resources 中的 `files` 条目，也不单靠 `objectVersion = 77` 判通过。
+- 同步目录必须属于配置所对应的 target；明确排除或无法解析 target、路径、构建变量等证据时不得绕过检查，仅因 pbxproj 的注释或排除名单出现 storyboard 文件名不能判通过。`NOT_VERIFIABLE` 应说明具体缺失的证据。静态通过表示资源接入证据充分，不代表已经构建或验证真机启动画面。
 
 ## 判定约定
 

@@ -22,8 +22,12 @@ from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 try:
     from .update_skill import UpdateError, ensure_latest
+    from .restore_detection import detect_restore
+    from .launch_membership import evaluate_membership
 except ImportError:
     from update_skill import UpdateError, ensure_latest
+    from restore_detection import detect_restore
+    from launch_membership import evaluate_membership
 
 
 DEFAULT_POLICY: dict[str, Any] = {
@@ -121,6 +125,7 @@ TEXT_EXTENSIONS = SOURCE_EXTENSIONS | {
     ".plist",
     ".entitlements",
     ".strings",
+    ".xcstrings",
     ".storyboard",
     ".xcprivacy",
     ".xib",
@@ -1100,19 +1105,19 @@ class Auditor:
         restore_hits: list[dict[str, Any]] = []
         delegate_pattern = r"UNUserNotificationCenterDelegate"
         assignment_pattern = r"UNUserNotificationCenter\s*\.\s*current\s*\(\s*\)\s*\.\s*delegate\s*="
-        restore_pattern = r"restorePurchases|restoreCompletedTransactions|Restore Purchases|恢复购买"
         for path, raw in self.source_texts.items():
             clean = mask_comments(raw)
             delegate_hits.extend({**item, "path": self.rel(path)} for item in match_evidence(path, clean, delegate_pattern))
             assignment_hits.extend({**item, "path": self.rel(path)} for item in match_evidence(path, clean, assignment_pattern))
-            restore_hits.extend({**item, "path": self.rel(path)} for item in match_evidence(path, clean, restore_pattern))
+        for path, raw in self.all_texts.items():
+            restore_hits.extend({**item, "path": self.rel(path)} for item in detect_restore(path, raw))
         if self.policy.get("forbid_notification_delegate", True):
             evidence = delegate_hits[:3] + assignment_hits[:3]
             self.add("AB-001", "FAIL" if evidence else "PASS", "blocker" if evidence else "info", "A 面未抢占通知代理", expected="不存在通知代理协议或代理赋值", actual="发现通知代理实现/赋值" if evidence else "未发现通知代理实现或赋值", evidence=evidence)
         else:
             self.add("AB-001", "NOT_VERIFIABLE", "medium", "A 面通知代理检查已关闭", expected="不存在通知代理协议或代理赋值", actual="项目策略 forbid_notification_delegate=false", manual_check="人工确认 A 面没有覆盖 B 面需要的通知代理。")
         if self.policy.get("forbid_restore", True):
-            self.add("IAP-009", "FAIL" if restore_hits else "PASS", "high" if restore_hits else "info", "A 面不提供恢复购买入口", expected="不存在 restore API 或恢复购买按钮", actual="发现恢复购买相关代码/文案" if restore_hits else "未发现恢复购买入口", evidence=restore_hits[:6])
+            self.add("IAP-009", "FAIL" if restore_hits else "PASS", "high" if restore_hits else "info", "A 面不提供恢复购买入口", expected="不存在 restore API 或恢复购买按钮", actual="发现恢复购买代码或操作入口" if restore_hits else "未发现恢复购买入口", evidence=restore_hits[:6])
         else:
             self.add("IAP-009", "NOT_VERIFIABLE", "medium", "恢复购买入口检查已关闭", expected="不存在 restore API 或恢复购买按钮", actual="项目策略 forbid_restore=false", manual_check="人工确认恢复购买入口符合当前商品类型和审核策略。")
 
@@ -1667,14 +1672,36 @@ class Auditor:
         if not launch_names:
             self.add("IOS-001", "FAIL", "blocker", "缺少 LaunchScreen 配置", expected="target 配置 UILaunchStoryboardName", actual="没有找到 Info.plist 或构建设置中的启动 storyboard", manual_check="检查每个可构建 target 的 Info.plist 和 Build Settings。")
         else:
-            storyboard_by_stem = {path.stem.lower(): path for path in self.storyboard_files}
+            storyboard_by_stem: dict[str, list[Path]] = {}
+            for storyboard in self.storyboard_files:
+                storyboard_by_stem.setdefault(storyboard.stem.lower(), []).append(storyboard)
+            has_synced_project = any("PBXFileSystemSynchronizedRootGroup" in self.source_texts[p] for p in self.project_files)
             for path, value, line in launch_names:
-                name = value.replace("$(PRODUCT_NAME)", "LaunchScreen").replace("$(TARGET_NAME)", "LaunchScreen")
-                candidate = storyboard_by_stem.get(name.lower())
-                if candidate:
-                    project_mentions = any(candidate.name in self.source_texts[p] for p in self.project_files)
+                if "$" in value:
+                    self.add("IOS-001", "NOT_VERIFIABLE", "medium", "LaunchScreen 名称包含未解析变量", expected="可解析的启动 storyboard 名称", actual=f"配置 {value}，无法静态解析", evidence=[{"path": self.rel(path), "line": line, "excerpt": value}], manual_check="确认对应 target 最终构建设置中的 UILaunchStoryboardName。")
+                    continue
+                name = value.removesuffix(".storyboard")
+                candidates = storyboard_by_stem.get(name.lower(), [])
+                if candidates:
+                    evaluations = []
+                    for candidate in candidates:
+                        membership = []
+                        for project in self.project_files:
+                            raw = self.source_texts[project]
+                            if has_synced_project:
+                                included, reason = evaluate_membership(project, raw, candidate, path)
+                            else:
+                                included = candidate.name in raw
+                                reason = "检测到传统 pbxproj 文件引用" if included else "未确认传统 pbxproj 资源引用"
+                            membership.append((project, included, reason))
+                        evaluations.append((candidate, membership))
+                    candidate, membership = next((item for item in evaluations if any(included for _, included, _ in item[1])), evaluations[0])
+                    project_mentions = any(included for _, included, _ in membership)
                     status = "PASS" if project_mentions or not self.project_files else "NOT_VERIFIABLE"
-                    self.add("IOS-001", status, "info" if status == "PASS" else "medium", "LaunchScreen.storyboard 配置", expected="启动 storyboard 存在并被 target 资源引用", actual=f"配置 {value}，文件 {self.rel(candidate)}" + ("，检测到 pbxproj 引用" if project_mentions else "，未确认 pbxproj 资源引用"), evidence=[{"path": self.rel(path), "line": line, "excerpt": value}, {"path": self.rel(candidate), "line": 1, "excerpt": "storyboard"}], manual_check="在 Xcode 目标的 Copy Bundle Resources 中确认 storyboard 已加入 target。" if status != "PASS" else None)
+                    reasons = "；".join(dict.fromkeys(reason for _, included, reason in membership if included == project_mentions)) or "未提供 Xcode 工程文件"
+                    evidence = [{"path": self.rel(path), "line": line, "excerpt": value}, {"path": self.rel(candidate), "line": 1, "excerpt": "storyboard"}]
+                    evidence.extend({"path": self.rel(project), "line": 1, "excerpt": reason} for project, included, reason in membership if included == project_mentions)
+                    self.add("IOS-001", status, "info" if status == "PASS" else "medium", "LaunchScreen.storyboard 配置", expected="启动 storyboard 存在并被 target 资源引用或同步目录纳入", actual=f"配置 {value}，文件 {self.rel(candidate)}；{reasons}", evidence=evidence, manual_check="核对上述证据缺口，在对应 target 的文件同步例外或 Copy Bundle Resources 中确认资源归属。" if status != "PASS" else None)
                 else:
                     self.add("IOS-001", "FAIL", "blocker", "LaunchScreen storyboard 文件缺失", expected=f"存在 {name}.storyboard", actual=f"配置 {value} 但没有匹配文件", evidence=[{"path": self.rel(path), "line": line, "excerpt": value}])
 

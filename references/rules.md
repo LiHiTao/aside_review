@@ -23,7 +23,9 @@
 | ID | 检查 | 失败条件 |
 |---|---|---|
 | AB-001 | 通知代理 | A 面源码实现 `UNUserNotificationCenterDelegate`，或把 `UNUserNotificationCenter.current().delegate` 指向 A 面对象。 |
-| IAP-009 | Restore | 源码或可见 UI 中出现 `restorePurchases`、`restoreCompletedTransactions`、`Restore Purchases` 等恢复购买入口。 |
+| IAP-009 | Restore | 检测到实际 `restorePurchases`、`restoreCompletedTransactions`、`AppStore.sync()` 调用/实现，或明确的恢复购买 UI 操作入口。仅协议和帮助说明中的关键词不构成功能证据。 |
+
+协议、帮助文字和嵌入源码的协议字符串（包括明确不提供恢复购买的声明）不得仅因含 `Restore Purchases` 或“恢复购买”判失败。真实调用和按钮仍须检查，不能用同文件或同一行的否定说明屏蔽功能证据。
 
 消费型商品的 `Transaction.updates`、未完成交易处理和 `finish()` 不等于恢复购买，不应误报为 restore。
 
@@ -75,6 +77,8 @@ META-003 必须复用 IAP-003 的状态和静态证据，避免同一商品提�
 |---|---|---|
 | IOS-001 | LaunchScreen | target 的 Info.plist 或构建设置没有 `UILaunchStoryboardName`，或对应 storyboard 文件缺失。 |
 | IOS-002 | App 名称 | 用户可见 `CFBundleDisplayName`、本地化名称或 App Store 名称中的 ASCII 英文字母数量少于 4 或多于 7。 |
+
+新版 Xcode 文件夹同步工程：解析 `PBXFileSystemSynchronizedRootGroup` 的真实路径、target 的 `fileSystemSynchronizedGroups`、该 target 的构建配置和 `membershipExceptions`。启动配置、磁盘文件、所属 target、同步目录和未排除证据完整即可静态 `PASS`，即使 Resources 的 `files = ()` 为空，且没有逐文件引用。不能仅凭 `objectVersion = 77` 或工程中出现同步目录类型判通过；未关联 target、排除名单命中、路径或配置归属无法解析时保持 `NOT_VERIFIABLE` 并说明原因。同步工程不得回退到文件名字符串匹配，因为排除名单也会包含文件名。静态接入检查不替代实际构建、真机启动与视觉检查。
 
 名称检查默认只统计 `A-Z/a-z`，忽略空格、标点和数字；无法解析构建变量时标记 `NOT_VERIFIABLE`，并列出 `PRODUCT_NAME`/Bundle ID 作为辅助证据。
 
