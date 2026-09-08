@@ -1,4 +1,4 @@
-"""Read-only effective physical source line counting for an explicit A-side scope.
+"""Read-only effective physical source line counting for an A-side project.
 
 This is a project policy metric, not a compiler or an App Store requirement.
 """
@@ -137,7 +137,7 @@ def count_source_lines(text: str, suffix: str = ".swift") -> dict[str, int]:
 
 
 def audit_code_lines(root: Path, policy: Mapping) -> dict:
-    """Return a CODE-001 finding; explicit scope is required even for pure A side."""
+    """Return CODE-001, defaulting missing or empty source scopes to the project root."""
     root = root.resolve()
     threshold = policy.get("code_line_threshold", 5000)
     result = {"id": "CODE-001", "status": "NOT_VERIFIABLE", "severity": "medium",
@@ -160,10 +160,10 @@ def audit_code_lines(root: Path, policy: Mapping) -> dict:
         result["actual"] = "；".join(errors)
         result["manual_check"] = "修正策略配置后重新扫描。"
         return result
+    # A normal project is the default A-side scope. Normalize only after
+    # validation so malformed explicit scopes never fall back to the root.
     if not scopes:
-        result["actual"] = "未明确 A 面源码范围，不能将整个工程自动计为 A 面"
-        result["manual_check"] = '设置 a_side_source_paths 为 A 面相对目录；整个根目录均为 A 面时显式设置为 ["."]。'
-        return result
+        scopes = ["."]
 
     def excluded(path: Path) -> bool:
         relative = path.relative_to(root)

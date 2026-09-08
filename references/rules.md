@@ -8,15 +8,15 @@
 
 | ID | 检查 | 判定 |
 |---|---|---|
-| CODE-001 | A 面有效代码行数 | 完整有效统计 > `code_line_threshold`（默认 5000）为 PASS，<= 门槛为 FAIL；范围不明、路径或读取/解析失败为 NOT_VERIFIABLE。 |
+| CODE-001 | A 面有效代码行数 | 完整有效统计 > `code_line_threshold`（默认 5000）为 PASS，<= 门槛为 FAIL；显式路径无效或读取/解析失败为 NOT_VERIFIABLE。 |
 
-统计范围由 `a_side_source_paths` 指定相对根目录的目录/源码文件；默认空列表不会自动扫描整个项目。已明确纯 A 面时可指定 `["."]`。`code_line_excluded_paths` 是相对根目录的精确排除路径（含全部后代）；沿用 `ignored_paths`。路径列表不使用 glob。源码扩展名为 swift/m/mm/h/c/cc/cpp/hpp；配置、资源和文档不计入。
+默认统计传入的正常工程根目录，无需确认 A 面归属；`a_side_source_paths` 缺省或为空列表 `[]` 均等效于 `["."]`。非空列表可指定相对根目录的目录/源码文件；无效显式范围不得自动回退。`code_line_excluded_paths` 是相对根目录的精确排除路径（含全部后代）；沿用 `ignored_paths`。路径列表不使用 glob。源码扩展名为 swift/m/mm/h/c/cc/cpp/hpp；配置、资源和文档不计入。
 
 按物理行统计，空白行与纯注释行不计数；代码与行尾注释共存时算一行。括号、声明、import 与多行字符串中的非空内容行均计入。正确识别 Swift 嵌套注释、普通/raw/多行字符串；无法完成词法识别时不得静默使用部分行数。各文件满足总行数 = 空白行 + 纯注释行 + 有效代码行。
 
 默认按目录名忽略（不区分大小写）：`.git`、`Pods`、`Carthage`、`build`、`DerivedData`、`.build`、`xcuserdata`、`node_modules`、`.venv`、`venv`、`swiftshield-output`、`SourcePackages`、`checkouts`、`vendor`、`vendors`、`thirdparty`、`third-party`、`generated`、`generatedsources`、`tests`、`uitests`、`unittests`、`bside`、`b-side`、`b_side`。另外忽略以 `Tests`/`UITests` 结尾的目录，以及文件 stem 以 `Test`/`Tests` 结尾（区分大小写）、以 `test_` 开头或以 `.generated` 结尾（后两者不区分大小写）的源码。不同命名的 B 面、测试、依赖和生成文件通过精确排除路径补充。
 
-显式空目录为 0 行失败；同一文件不因重叠路径重复计数。无法按名称识别的 B 面、第三方和生成代码应通过排除路径指定，不根据代码内容猜测归属。PDF 仅显示聚合检查，JSON/Markdown 按需提供文件计数明细。
+默认工程或显式目录没有合格源码时为 0 行失败；同一文件不因重叠路径重复计数。无法按名称识别的 B 面、第三方和生成代码应通过排除路径指定，不根据代码内容猜测归属。PDF 仅显示聚合检查，JSON/Markdown 按需提供文件计数明细。
 
 ## 内购
 

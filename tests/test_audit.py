@@ -175,6 +175,11 @@ class AuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="ios-aside-review-test-") as directory:
             root = Path(directory)
             write_fixture(root)
+            # The default scope now audits source size, so the clean fixture
+            # must also meet the default >5000 effective-line requirement.
+            (root / "Carvory" / "Business.swift").write_text(
+                "\n".join(f"let fixtureLine{index} = {index}" for index in range(5001))
+            )
             report = Auditor(root, DEFAULT_POLICY).run().report(only_failures=False)
             self.assertEqual(report["summary"]["FAIL"], 0, report["findings"])
             self.assertGreater(report["summary"]["PASS"], 0)

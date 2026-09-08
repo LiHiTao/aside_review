@@ -8,25 +8,30 @@ from scripts.render_audit_pdf import render_audit_pdf, preflight_pdf
 
 
 class CodeLineIntegrationTests(unittest.TestCase):
-    def test_default_scope_is_unverifiable_and_rule_is_in_full_report(self):
+    def test_default_scope_counts_project_and_rule_is_in_full_report(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "Business.swift").write_text("let x = 1\n" * 5001)
             report = Auditor(root).run().report()
             self.assertEqual(tuple(f["id"] for f in report["findings"]), RULE_ORDER)
             finding = next(f for f in report["findings"] if f["id"] == "CODE-001")
-            self.assertEqual(finding["status"], "NOT_VERIFIABLE")
+            self.assertEqual(finding["status"], "PASS")
             self.assertIn("CODE-001", markdown_report(report))
 
     def test_threshold_report_details_and_no_project_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "Aside.swift"
-            for lines, expected in ((5000, "FAIL"), (5001, "PASS")):
-                with self.subTest(lines=lines):
+            for policy, lines, expected in (
+                ({}, 5000, "FAIL"), ({}, 5001, "PASS"),
+                ({"a_side_source_paths": []}, 5000, "FAIL"),
+                ({"a_side_source_paths": []}, 5001, "PASS"),
+                ({"a_side_source_paths": ["."]}, 5001, "PASS"),
+            ):
+                with self.subTest(policy=policy, lines=lines):
                     raw = "// documentation\n\n" + "let x = 1 // trailing\n" * lines
                     source.write_text(raw)
-                    report = Auditor(root, {"a_side_source_paths": ["."]}).run().report()
+                    report = Auditor(root, policy).run().report()
                     finding = next(f for f in report["findings"] if f["id"] == "CODE-001")
                     self.assertEqual(finding["status"], expected, finding)
                     self.assertTrue(finding["details"])

@@ -77,9 +77,37 @@ class CodeLineAuditTests(unittest.TestCase):
             self.write('App.swift', 'let x = 0\n' * lines)
             self.assertEqual(status, self.audit()['status'])
 
-    def test_no_implicit_scope(self):
-        self.write('App.swift', 'x\n' * 5001)
-        self.assertEqual('NOT_VERIFIABLE', audit_code_lines(self.root, {})['status'])
+    def test_default_scopes_use_project_root_and_strict_boundary(self):
+        for policy in ({}, {'a_side_source_paths': []}):
+            for lines, status in ((5000, 'FAIL'), (5001, 'PASS')):
+                with self.subTest(policy=policy, lines=lines):
+                    self.write('App.swift', 'x\n' * lines)
+                    result = audit_code_lines(self.root, policy)
+                    self.assertEqual(status, result['status'])
+                    self.assertEqual(lines, result['details'][0]['code_lines'])
+
+    def test_default_empty_project_is_zero_fail(self):
+        for policy in ({}, {'a_side_source_paths': []}):
+            with self.subTest(policy=policy):
+                result = audit_code_lines(self.root, policy)
+                self.assertEqual('FAIL', result['status'])
+                self.assertIn('0 行，0 个文件', result['actual'])
+
+    def test_default_scope_preserves_source_filters_and_exclusions(self):
+        self.write('App/Main.swift', 'x\n' * 5000)
+        for name in ['Pods/A.swift', 'FeatureTests/A.swift', 'B_side/A.swift',
+                     'Generated/A.swift', 'FooTest.swift', 'api.generated.swift',
+                     'Ignore/A.swift', 'Custom/A.swift', 'UI.storyboard',
+                     'project.pbxproj', 'terms.html']:
+            self.write(name, 'x\n' * 5001)
+        for scope_policy in ({}, {'a_side_source_paths': []}):
+            with self.subTest(policy=scope_policy):
+                result = audit_code_lines(self.root, {
+                    **scope_policy, 'ignored_paths': ['Ignore'],
+                    'code_line_excluded_paths': ['Custom']})
+                self.assertEqual('FAIL', result['status'])
+                self.assertEqual(['App/Main.swift'], [item['path'] for item in result['details']])
+                self.assertEqual(5000, result['details'][0]['code_lines'])
 
     def test_explicit_empty_directory_is_zero_fail(self):
         result = self.audit()
@@ -104,7 +132,9 @@ class CodeLineAuditTests(unittest.TestCase):
         self.assertEqual('FAIL', self.audit(a_side_source_paths=['A'])['status'])
 
     def test_invalid_configs_and_paths(self):
-        for policy in [{'a_side_source_paths': 'A'}, {'a_side_source_paths': ['missing']},
+        self.write('Good.swift', 'x\n' * 5001)
+        for policy in [{'a_side_source_paths': None}, {'a_side_source_paths': ['']},
+                       {'a_side_source_paths': [2]}, {'a_side_source_paths': 'A'}, {'a_side_source_paths': ['missing']},
                        {'a_side_source_paths': ['../outside']}, {'a_side_source_paths': [str(self.root)]},
                        {'code_line_threshold': True}, {'code_line_threshold': -1},
                        {'code_line_excluded_paths': [2]}, {'code_line_excluded_paths': ['*.swift']}, {'code_line_excluded_paths': ['../outside']}, {'code_line_excluded_paths': ['/outside']}, {'ignored_paths': None}]:
