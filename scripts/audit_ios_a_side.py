@@ -24,10 +24,12 @@ try:
     from .update_skill import UpdateError, ensure_latest
     from .restore_detection import detect_restore
     from .launch_membership import evaluate_membership
+    from .code_lines import audit_code_lines
 except ImportError:
     from update_skill import UpdateError, ensure_latest
     from restore_detection import detect_restore
     from launch_membership import evaluate_membership
+    from code_lines import audit_code_lines
 
 
 DEFAULT_POLICY: dict[str, Any] = {
@@ -102,6 +104,9 @@ DEFAULT_POLICY: dict[str, Any] = {
         ],
     },
     "ignored_paths": [],
+    "a_side_source_paths": [],
+    "code_line_excluded_paths": [],
+    "code_line_threshold": 5000,
 }
 
 IGNORED_DIRS = {
@@ -215,6 +220,7 @@ STATUS_PRIORITY = {"PASS": 0, "NOT_VERIFIABLE": 1, "WARN": 2, "FAIL": 3}
 SEVERITY_PRIORITY = {"info": 0, "low": 1, "medium": 2, "high": 3, "blocker": 4}
 
 RULE_ORDER = (
+    "CODE-001",
     "IAP-SUMMARY",
     "AB-001",
     "IAP-009",
@@ -233,6 +239,7 @@ RULE_ORDER = (
 )
 
 RULE_TITLES = {
+    "CODE-001": "A 面有效代码行数",
     "IAP-SUMMARY": "内购项统一检查",
     "AB-001": "A 面通知代理",
     "IAP-009": "恢复购买入口",
@@ -782,6 +789,7 @@ class Auditor:
     def run(self) -> "Auditor":
         self.discover()
         self.load_inputs()
+        self.check_code_lines()
         self.check_iap()
         self.check_ab_and_restore()
         self.check_permissions()
@@ -790,6 +798,11 @@ class Auditor:
         self.check_sensitive_terms()
         self.check_launch_and_name()
         return self
+
+    def check_code_lines(self) -> None:
+        finding = audit_code_lines(self.root, self.policy)
+        rule_id = finding.pop("id")
+        self.add(rule_id=rule_id, **finding)
 
     def check_iap(self) -> None:
         checks: list[dict[str, Any]] = []

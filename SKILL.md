@@ -1,6 +1,6 @@
 ---
 name: ios-aside-review
-description: 对目录结构不固定的 iOS A 面项目执行只读上架风险审计。检查 StoreKit 内购与 JSON 配置、B 面通知代理冲突、restore 功能、PrivacyInfo.xcprivacy、相机/相册/麦克风/推送/ATT 的 API 使用及 Xcode 配置、敏感词（AI、Dating、赌博、色情等）、第三方 AI 数据共享、App Store 元数据、LaunchScreen.storyboard 和 4–7 个英文字母的 App 名称。用户要求检查、审计、拒审排查、上架前验证，或明确使用 $ios-aside-review 时触发；不得修改目标项目代码或配置。
+description: 对目录结构不固定的 iOS A 面项目执行只读上架风险审计。检查 A 面有效代码是否超过 5000 行、StoreKit 内购与 JSON 配置、B 面通知代理冲突、restore 功能、PrivacyInfo.xcprivacy、相机/相册/麦克风/推送/ATT 的 API 使用及 Xcode 配置、敏感词（AI、Dating、赌博、色情等）、第三方 AI 数据共享、App Store 元数据、LaunchScreen.storyboard 和 4–7 个英文字母的 App 名称。用户要求检查、审计、拒审排查、上架前验证，或明确使用 $ios-aside-review 时触发；不得修改目标项目代码或配置。
 ---
 
 # iOS A 面审核检查
@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.0.1`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.0.2`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -76,6 +76,9 @@ python3 scripts/audit_ios_a_side.py ./path/to/project \
     "赌博/博彩": ["gambling", "casino", "betting", "poker", "lottery", "赌博", "博彩", "赌场", "下注"],
     "色情/成人内容": ["porn", "pornography", "xxx", "adult content", "sexual", "nude", "色情", "淫秽", "成人内容", "裸体"]
   },
+  "a_side_source_paths": [],
+  "code_line_excluded_paths": [],
+  "code_line_threshold": 5000,
   "ignored_paths": []
 }
 ```
@@ -89,6 +92,26 @@ python3 scripts/audit_ios_a_side.py ./path/to/project \
 商品 ID 必须有商品语义证据；不得仅因普通 `id` 含点号、价格字样或类似商品的命名就计入内购。通知、任务、路由等业务 ID 不参与商品数量、一致性和大小写统计。Swift 字符串插值或拼接不能截取为商品字面量；确属动态内购但无法解析时保留 `NOT_VERIFIABLE`。具体识别边界见规则参考。
 
 IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或非布尔值时判定 `FAIL`；字段缺失时判定 `NOT_VERIFIABLE`，不得把缺少提交证据自动视为通过。
+
+## A 面有效代码行数（CODE-001）
+
+默认要求 **有效代码行数严格大于 5000**：5000 行不通过，5001 行通过。这是项目自定门槛。按物理行计数，排除空行、纯注释行；代码后带注释只计一行，同一行多条语句只计一行，只有括号、声明或 import 的代码行也计入。字符串中的注释符号不当作注释；多行字符串的非空内容行计入代码行。
+
+只统计 A 面业务源码 `.swift`、`.m`、`.mm`、`.h`、`.c`、`.cc`、`.cpp`、`.hpp`。不统计配置、协议文档、资源文件；排除测试、第三方、B 面、生成代码与构建产物。默认排除名单及边界见规则参考；无法按名称识别的第三方、B 面或生成目录应显式填写 `code_line_excluded_paths`，不要猜测任意目录的业务归属。
+
+扫描器通过项目策略 `a_side_source_paths` 确定范围，接受相对审计根目录的目录或源码文件列表。用户已明确整个项目为纯 A 面时，技能执行者可直接使用 `["."]`；若有明确 A 面子目录，则填写该目录。范围不明确时只读检查项目说明，仍不能确认则提示指定范围，不把整个项目默认算入。扫描器未收到范围时输出 `NOT_VERIFIABLE`。为调用扫描器创建的临时策略必须放在项目之外，并保留已有策略字段。
+
+```json
+{
+  "a_side_source_paths": ["App/Aside"],
+  "code_line_excluded_paths": ["App/Aside/ExternalSDK", "App/Aside/GeneratedModels"],
+  "code_line_threshold": 5000
+}
+```
+
+两个路径字段均为相对根目录的精确路径列表，不使用 glob。重叠目录中的同一文件只计一次，不跟随指向根目录外的符号链接。显式空目录按 0 行判 `FAIL`；路径无效、读取/解码/词法解析失败或范围缺失时为 `NOT_VERIFIABLE`，部分统计达到阈值也不能判通过。阈值为非负整数，比较关系始终为严格大于。
+
+PDF 完整清单显示状态、有效行数、文件数和门槛。内部证据及显式请求的 JSON/Markdown 保留每个文件的相对路径、总行数、空白行、纯注释行和有效代码行。此检查不要求修改或自动补充目标项目代码。
 
 ## Restore 与 LaunchScreen 证据边界
 
