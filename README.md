@@ -2,7 +2,7 @@
 
 iOS A 面审核技能
 
-版本：**1.0.2**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
+版本：**1.0.3**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
 
 ## 安装
 
@@ -32,6 +32,7 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 
 完整规则见 [SKILL.md](SKILL.md) 与 [规则参考](references/rules.md)。其中：
 
+- 同一档位同时含 `id` 与 `productId` 时只统计真实商品 ID，不需修改项目字段名规避重复计数。
 - 档位按商品列表原有价格顺序，从默认 $0.99 起递增判断，不要求名称或商品 ID 包含序号。
 - 存在非空应用描述文案即通过描述检查，不要求包含内购用语。
 - A 面有效源码必须严格超过 5000 行，排除空行和纯注释；通过 `a_side_source_paths` 指定范围，未指定时保留需复核，具体口径见 SKILL.md。

@@ -25,11 +25,13 @@ try:
     from .restore_detection import detect_restore
     from .launch_membership import evaluate_membership
     from .code_lines import audit_code_lines
+    from .product_context import identity_fields
 except ImportError:
     from update_skill import UpdateError, ensure_latest
     from restore_detection import detect_restore
     from launch_membership import evaluate_membership
     from code_lines import audit_code_lines
+    from product_context import identity_fields
 
 
 DEFAULT_POLICY: dict[str, Any] = {
@@ -736,24 +738,29 @@ class Auditor:
         for path, raw in self.source_texts.items():
             if path.suffix.lower() not in SOURCE_EXTENSIONS:
                 continue
-            clean = mask_comments(raw)
-            for match in id_pattern.finditer(clean):
+            clean, fields = identity_fields(raw)
+            for field in fields:
+                explicit = field.label.lower() != "id"
+                if not explicit and field.has_explicit_identity:
+                    continue
+                match = id_pattern.match(clean, field.start)
+                if match is None:
+                    # Property forwarding in model initializers is not another
+                    # catalogue entry (self.productId = productId).
+                    member_assignment = bool(re.search(r"\.\s*$", clean[:field.start]))
+                    if explicit and not member_assignment:
+                        self.dynamic_code_products.append({
+                            "path": self.rel(path),
+                            "line": line_number(raw, field.start),
+                            "excerpt": "商品 ID 为动态表达式，无法静态解析",
+                        })
+                    continue
                 product_id = match.group("value").strip()
-                # Keep context within the same tuple/initializer, or the line
-                # for a plain assignment. Do not borrow a later record's price.
-                open_pos = clean.rfind("(", 0, match.start())
-                previous_close = clean.rfind(")", 0, match.start())
-                in_initializer = open_pos > previous_close
-                next_close = clean.find(")", match.end()) if in_initializer else -1
-                if next_close == -1:
-                    next_close = clean.find("\n", match.end())
-                if next_close == -1:
-                    next_close = len(clean)
-                context = clean[open_pos + 1 if in_initializer else match.start():next_close]
+                context = field.context
                 price_match = price_pattern.search(context)
-                initializer = re.search(r"([A-Za-z_][A-Za-z_0-9]*)\s*$", clean[:open_pos]) if in_initializer else None
+                initializer = field.initializer
                 product_initializer = bool(initializer and re.search(
-                    r"(?:product|iap|sku|purchase)", initializer.group(1), re.IGNORECASE
+                    r"(?:product|iap|sku|purchase)", initializer, re.IGNORECASE
                 ))
                 priced_product = bool(price_match and re.search(
                     r"\b(?:coins|credits|tokens|stamps|sku|referenceName|reference_name|configuredPrice|configured_price|price_usd)\s*[:=]",
