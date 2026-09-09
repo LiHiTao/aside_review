@@ -2,7 +2,7 @@
 
 扫描器把规则分成确定性检查和运行时/人工检查，并始终输出本文件列出的全部检查项。金币/积分数量不是本 Skill 的检查项：不要求 product ID、reference_name 或 name 展示数量，也不在报告中输出金币/积分数量。内购报告只展示统一汇总结果，不按商品逐条列出。
 
-状态含义：`PASS` 表示存在明确静态证据或完整扫描未发现禁止模式；`FAIL` 表示确定违反规则；`NOT_VERIFIABLE` 表示缺少输入、策略关闭或必须依赖真机/App Store Connect；`WARN` 表示发现可疑模式但证据不足。不得为追求二态结果把 `NOT_VERIFIABLE` 强行改成通过或失败。
+状态含义：`PASS` 表示存在明确静态证据、本次协议 URL 响应满足规则，或完整扫描未发现禁止模式；`FAIL` 表示确定违反规则或必要入口缺失；`NOT_VERIFIABLE` 表示证据不足、网络结果无法确认、策略关闭或必须依赖真机/App Store Connect；`WARN` 表示发现可疑模式但证据不足。不得为追求二态结果把 `NOT_VERIFIABLE` 强行改成通过或失败。
 
 ## A 面代码规模
 
@@ -17,6 +17,19 @@
 默认按目录名忽略（不区分大小写）：`.git`、`Pods`、`Carthage`、`build`、`DerivedData`、`.build`、`xcuserdata`、`node_modules`、`.venv`、`venv`、`swiftshield-output`、`SourcePackages`、`checkouts`、`vendor`、`vendors`、`thirdparty`、`third-party`、`generated`、`generatedsources`、`tests`、`uitests`、`unittests`、`bside`、`b-side`、`b_side`。另外忽略以 `Tests`/`UITests` 结尾的目录，以及文件 stem 以 `Test`/`Tests` 结尾（区分大小写）、以 `test_` 开头或以 `.generated` 结尾（后两者不区分大小写）的源码。不同命名的 B 面、测试、依赖和生成文件通过精确排除路径补充。
 
 默认工程或显式目录没有合格源码时为 0 行失败；同一文件不因重叠路径重复计数。无法按名称识别的 B 面、第三方和生成代码应通过排除路径指定，不根据代码内容猜测归属。PDF 仅显示聚合检查，JSON/Markdown 按需提供文件计数明细。
+
+## 协议入口与联网验证
+
+| ID | 检查 | 判定 |
+|---|---|---|
+| LEGAL-001 | 协议打开方式 | 隐私协议和用户协议的所有可识别入口都必须关联到应用内 WKWebView 的 URL 加载；明确外部打开、Safari view controller、本地 HTML/文件或完整扫描缺少必要入口为 FAIL；动态和不完整证据为 NOT_VERIFIABLE。 |
+| LEGAL-002 | 协议 URL 可访问性 | 对实际协议 URL 发 GET；最终 2xx 且返回非空可读页面为 PASS；非法/空 URL、404/410、空白页面、重定向循环为 FAIL；超时、连接/DNS/TLS问题、临时服务错误、验证页面、JS空壳或未知内容为 NOT_VERIFIABLE。 |
+
+固定检查隐私协议与用户协议，不扩展到支持页等其它链接。入口、常量/参数和 WKWebView 封装必须属于同一可解析路径；项目中无关的 WebView、Safari、协议字样、注释或示例字符串不会被借用作证据。自定义 openURL 若实际转给 WKWebView 可通过，默认外跳则失败。每个协议的所有入口都参加汇总，不能只选择一个通过入口。缺少 URL 不发送请求；缺少必要协议与动态无法解析的协议分别处理。
+
+每次审计相同 URL（忽略 fragment）只请求一次，记录检查时间、原始及最终 URL、HTTP 状态码和 Content-Type。限定公开 HTTP(S) 地址，初始和每一跳均检查，最多 5 跳、每次超时 10 秒、读取上限 1 MiB，使用正常 TLS 校验，不发送 Cookie/认证信息，不使用环境代理凭证。拒绝本机、内网及非公网解析结果。不能将登录/反爬页面或脚本空壳当作可读协议正文；正文中的普通词语不得直接触发验证页判定。
+
+请求只提供当前网络可访问性证据，不证明内容合规、协议类型或真机渲染。测试通过注入网络传输模拟响应，测试流程不得访问真实协议服务器。PDF 只展示两项清单结论；详细入口与网络记录保留于内部结果和按需生成的 JSON/Markdown，schema 2.0 不变。
 
 ## 内购
 

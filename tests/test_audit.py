@@ -5,6 +5,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+try:
+    from .legal_fixture import write_legal_fixture, successful_probe
+except ImportError:
+    from legal_fixture import write_legal_fixture, successful_probe
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
@@ -81,6 +87,12 @@ def write_fixture(root: Path, broken: bool = False) -> None:
 
 
 class AuditTests(unittest.TestCase):
+    def setUp(self):
+        # Audit fixtures never contact live agreement servers.
+        probe = patch("scripts.audit_ios_a_side.probe_legal_url", side_effect=successful_probe)
+        probe.start()
+        self.addCleanup(probe.stop)
+
     def test_price_order_uses_original_catalogue_order_without_name_ordinals(self) -> None:
         cases = [
             (PRICES, {}, "PASS"),
@@ -175,6 +187,7 @@ class AuditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="ios-aside-review-test-") as directory:
             root = Path(directory)
             write_fixture(root)
+            write_legal_fixture(root)
             # The default scope now audits source size, so the clean fixture
             # must also meet the default >5000 effective-line requirement.
             (root / "Carvory" / "Business.swift").write_text(
