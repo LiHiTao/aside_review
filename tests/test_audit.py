@@ -8,9 +8,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 try:
-    from .legal_fixture import write_legal_fixture, successful_probe
+    from .legal_fixture import write_legal_fixture, assert_no_audit_network
 except ImportError:
-    from legal_fixture import write_legal_fixture, successful_probe
+    from legal_fixture import write_legal_fixture, assert_no_audit_network
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SKILL_ROOT))
@@ -88,10 +88,7 @@ def write_fixture(root: Path, broken: bool = False) -> None:
 
 class AuditTests(unittest.TestCase):
     def setUp(self):
-        # Audit fixtures never contact live agreement servers.
-        probe = patch("scripts.audit_ios_a_side.probe_legal_url", side_effect=successful_probe)
-        probe.start()
-        self.addCleanup(probe.stop)
+        assert_no_audit_network(self)
 
     def test_price_order_uses_original_catalogue_order_without_name_ordinals(self) -> None:
         cases = [

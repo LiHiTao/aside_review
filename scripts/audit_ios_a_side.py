@@ -17,8 +17,7 @@ import tempfile
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
-from urllib.parse import urldefrag
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 
 try:
@@ -28,7 +27,6 @@ try:
     from .code_lines import audit_code_lines
     from .product_context import identity_fields
     from .legal_links import analyze_legal_links
-    from .legal_url_probe import probe_legal_url
 except ImportError:
     from update_skill import UpdateError, ensure_latest
     from restore_detection import detect_restore
@@ -36,7 +34,6 @@ except ImportError:
     from code_lines import audit_code_lines
     from product_context import identity_fields
     from legal_links import analyze_legal_links
-    from legal_url_probe import probe_legal_url
 
 
 DEFAULT_POLICY: dict[str, Any] = {
@@ -237,7 +234,6 @@ RULE_ORDER = (
     "ATT-001",
     "ATT-002",
     "LEGAL-001",
-    "LEGAL-002",
     "PRIV-001",
     "META-001",
     "META-002",
@@ -258,7 +254,6 @@ RULE_TITLES = {
     "ATT-001": "ATT Xcode 配置",
     "ATT-002": "ATT 用途文案",
     "LEGAL-001": "协议打开方式",
-    "LEGAL-002": "协议 URL 可访问性",
     "PRIV-001": "第三方 AI 数据共享",
     "META-001": "商店应用描述",
     "META-002": "免费与价格声明",
@@ -566,8 +561,7 @@ def unique_evidence(items: Iterable[Mapping[str, Any]], limit: int = 20) -> list
 
 
 class Auditor:
-    def __init__(self, root: Path, policy: Mapping[str, Any] | None = None, *, legal_url_probe: Callable[[str], dict[str, Any]] | None = None):
-        self.legal_url_probe = legal_url_probe or probe_legal_url
+    def __init__(self, root: Path, policy: Mapping[str, Any] | None = None):
         self.source_scan_incomplete = False
         self.root = root.resolve()
         self.policy = dict(DEFAULT_POLICY)
@@ -832,8 +826,6 @@ class Auditor:
             scan_incomplete=self.source_scan_incomplete,
         )
         route_details: list[dict[str, Any]] = []
-        network_details: list[dict[str, Any]] = []
-        cache: dict[str, dict[str, Any]] = {}
         for index, entry in enumerate(entries, 1):
             label = "隐私协议" if entry["kind"] == "privacy" else "用户协议"
             label += f" · 入口 {index}"
@@ -846,31 +838,7 @@ class Auditor:
                 "actual": entry["actual"], "evidence": evidence,
                 "manual_check": entry.get("manual_check"), "url": entry.get("url"),
             })
-            url = entry.get("url")
-            if url is None:
-                missing = entry.get("missing", False)
-                probe = {"status": "FAIL" if missing else "NOT_VERIFIABLE",
-                         "actual": "未发现协议 URL" if missing else "协议 URL 无法静态确定，未发送请求",
-                         "manual_check": "核对协议入口实际使用的 URL 后重新检查。"}
-            else:
-                try:
-                    cache_key = urldefrag(url)[0]
-                except ValueError:
-                    cache_key = url
-                if cache_key not in cache:
-                    cache[cache_key] = self.legal_url_probe(cache_key)
-                probe = dict(cache[cache_key])
-            network_status = probe["status"]
-            network_details.append({
-                "id": "LEGAL-002", "label": label, "status": network_status,
-                "severity": "high" if network_status == "FAIL" else "info" if network_status == "PASS" else "medium",
-                "expected": "协议 URL 本次 GET 返回成功且有可读页面内容",
-                "actual": probe["actual"], "evidence": evidence,
-                "manual_check": probe.get("manual_check"), "url": url,
-                "network": probe,
-            })
-        self.add_group("LEGAL-001", "协议打开方式", "隐私协议与用户协议的所有入口均通过应用内 WKWebView 打开 URL", route_details)
-        self.add_group("LEGAL-002", "协议 URL 可访问性", "两类协议的实际 URL 均能在本次联网检查中返回可读页面", network_details)
+        self.add_group("LEGAL-001", "协议打开方式", "用户协议和隐私协议均通过端内 WKWebView 打开", route_details)
 
     def check_code_lines(self) -> None:
         finding = audit_code_lines(self.root, self.policy)
@@ -1989,13 +1957,6 @@ def markdown_report(report: Mapping[str, Any]) -> str:
                     f"  - {status_labels.get(detail['status'], detail['status'])} · "
                     f"`{detail.get('id', finding['id'])}` · {detail['label']}：{detail['actual']}"
                 )
-        for detail in finding.get("details", []):
-            network = detail.get("network")
-            if network:
-                fields = ("original_url", "final_url", "http_status", "content_type", "checked_at")
-                metadata = "；".join(f"{key}={network[key]}" for key in fields if network.get(key) is not None)
-                if metadata:
-                    lines.append(f"- 联网记录（{detail['label']}）：{metadata}")
         if finding.get("evidence"):
             lines.append("- 证据：")
             for evidence in finding["evidence"]:

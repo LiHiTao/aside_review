@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import patch
 
 LEGAL_SOURCE = '''import SwiftUI
 import WebKit
@@ -28,7 +29,14 @@ def write_legal_fixture(root: Path) -> None:
     (root / "LegalViews.swift").write_text(LEGAL_SOURCE)
 
 
-def successful_probe(url: str) -> dict:
-    return {"status": "PASS", "actual": "HTTP 200，返回非空可读页面", "manual_check": None,
-            "original_url": url, "final_url": url, "http_status": 200,
-            "content_type": "text/html", "checked_at": "2026-09-09T00:00:00Z"}
+def assert_no_audit_network(test_case) -> None:
+    """Fail even if audit code catches a forbidden network attempt internally."""
+    for target in (
+        "socket.getaddrinfo", "socket.socket", "socket.create_connection",
+        "urllib.request.urlopen", "urllib.request.OpenerDirector.open",
+        "http.client.HTTPConnection.connect", "http.client.HTTPSConnection.connect",
+    ):
+        guard = patch(target, side_effect=AssertionError("Static audits must not request protocol URLs"))
+        mocked = guard.start()
+        test_case.addCleanup(guard.stop)
+        test_case.addCleanup(mocked.assert_not_called)

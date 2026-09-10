@@ -1,5 +1,13 @@
 # 版本更新日志
 
+## 1.0.7
+
+- 协议检查仅验证用户协议与隐私协议通过端内 WKWebView 打开，保留入口、页面封装及加载链关联证据。
+- 移除 LEGAL-002 和协议 URL 网络请求，不再检查部署、DNS、HTTP 状态、重定向或页面可访问性。
+- PDF 完整清单调整为 17 项；JSON/Markdown 移除协议请求记录，schema 2.0 保持不变。
+- 保留导航控制器包装、Terms & Support、多入口及动态路径的静态判定；技能 GitHub 自动更新检查独立保留。
+- 删除协议网络探测模块及对应测试，补充禁止网络请求和未部署 URL 不影响端内接入判定的回归覆盖。
+
 ## 1.0.6
 
 - 修复协议页面套在 UINavigationController(rootViewController:) 中时无法追踪的误报，继续关联实际呈现的根页面及 WKWebView 加载 URL。
