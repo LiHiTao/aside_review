@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.0.7`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.0.8`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -97,18 +97,18 @@ IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或�
 
 ## 协议端内打开方式（LEGAL-001）
 
-固定检查隐私协议（Privacy Policy）和用户协议（Terms of Service / Terms of Use / User Agreement），普通工程默认启用，无需额外策略文件。
+固定检查隐私协议（Privacy Policy）和用户协议（Terms of Service / Terms of Use / User Agreement）。通过标准仅为：两类协议的入口关联页面或共用封装中存在 WKWebView 加载调用。
 
-- `LEGAL-001`：每个可识别入口必须有“协议入口 → 实际 URL → 页面封装 → WKWebView 加载”的关联证据。支持可静态解析的 SwiftUI、UIKit 和常见跨文件封装；仅存在 WebKit 导入、WKWebView 类、协议字样或 URL 常量都不等于入口接入。注释和说明字符串中的代码示例不作为功能证据。
-- 外部浏览器、`SFSafariViewController`、本地 HTML / 文件加载不满足本规则。SwiftUI `Link` / `openURL` 根据实际处理链判断；能确认自定义处理在应用内 WKWebView 打开该协议 URL 时可通过，不因关键词直接失败。
-- 同一协议多个入口分别检查，不能用一个正常入口掩盖另一个外跳入口。完整扫描缺少必要协议入口为 `FAIL`；源码读取不完整、动态 URL、动态路由或无法关联的封装为 `NOT_VERIFIABLE`，说明具体缺失的证据，不猜测为通过。
-- UIKit 协议页面可以通过 `UINavigationController(rootViewController:)` 包装后呈现；继续追踪真实根页面及其 URL，不要求为扫描器移除导航容器。识别 `Terms & Support` / `Terms and Support`；普通 `Support` 需要关联到实际呈现页面的用户协议标题才能归入用户协议，不能仅凭支持入口或 URL 字样判通过。
+- 按“入口 → 事件处理 → 页面／共用封装 → 加载方法”做轻量源码关联，支持 SwiftUI、UIKit、导航控制器包装及跨方法调用。仅导入 WebKit、创建 WKWebView、出现协议字样或无关页面中的 WebView 不足以通过；注释、说明字符串和未调用的辅助函数不作为加载实现证据。
+- 关联到 WKWebView 的 `load` / `loadRequest` / `loadHTMLString` / `loadFileURL` 调用均属于加载实现。URL 为动态参数不影响通过；不再要求 URL 字面量解析、完整控制流证明、所有分支覆盖或 WebView 实例挂载证明。条件、Close 按钮、布局和进度提示不因其存在而降级。
+- 明确关联到外部浏览器或 `SFSafariViewController` 的协议入口仍为 `FAIL`；多个入口分别记录，正常 WKWebView 入口不能掩盖其它外跳入口。SwiftUI Link/openURL 按关联处理链判断，不仅凭关键词。
+- 支持普通按钮、UITableView 行选择，以及按钮工厂生成控件并通过标识分发的共用事件。标题、section/row、控件标识及事件需对应，不借用其它行或其它控件的加载调用。
+- `Terms & Support` / `Terms and Support` 为用户协议名称。普通 Support 可通过传入页面的标题参数和页面标题赋值关联到用户协议；不因同一方法中存在无关条件而丢弃该证据，普通帮助页仍不作为协议证据。
+- 确认缺少必要协议入口为 `FAIL`；发现协议候选但无法关联页面或加载调用、源码读取不完整时为 `NOT_VERIFIABLE`，报告具体缺失的关联证据。
 
-协议检查仅验证用户协议和隐私协议是否通过端内 WKWebView 打开。不请求协议 URL，不检测部署、DNS、HTTP 状态、重定向、页面正文或可访问性；不得因协议链接尚未部署、404、超时或登录验证页面而新增失败或需复核结论。源码中的 URL/参数仍用于关联协议入口与 WKWebView 加载链，无法关联的动态路径继续说明缺失的源码证据。
+不请求协议 URL，不检查部署、DNS、HTTP 状态、重定向、正文或真机效果。`PASS` 仅表示存在协议关联的 WKWebView 加载实现，不表示所有运行时路径均已验证。技能的 GitHub 自动更新检查独立保留。
 
-协议 `PASS` 表示源码接入证据满足端内 WKWebView 打开要求，不代表已验证页面内容或真机渲染。不构建或运行 App。技能的 GitHub 自动版本检查独立保留，不属于协议部署检测。
-
-PDF 仅保留一条协议打开方式聚合结果，移除协议 URL 可访问性检查项。JSON/Markdown 按需保留两类协议各入口的源码位置、URL 与加载链证据，不输出请求时间、最终响应 URL 或 HTTP 状态；JSON schema 继续使用 2.0，默认仍仅交付 PDF。
+PDF 仅保留 LEGAL-001，完整清单共 17 项。JSON/Markdown 按需保留两类协议各入口的源码位置、可解析 URL 和调用证据；动态 URL 可为空，不以此降级。继续使用 schema 2.0，不输出协议网络请求记录。目标工程保持只读，不构建或启动 App。
 
 ## A 面有效代码行数（CODE-001）
 

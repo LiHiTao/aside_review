@@ -7,13 +7,58 @@ from unittest.mock import patch
 from scripts.audit_ios_a_side import Auditor, RULE_ORDER, markdown_report
 try:
     from .legal_fixture import LEGAL_SOURCE, write_legal_fixture, assert_no_audit_network
+    from .associated_legal_fixture import write_associated_legal_fixture
 except ImportError:
     from legal_fixture import LEGAL_SOURCE, write_legal_fixture, assert_no_audit_network
+    from associated_legal_fixture import write_associated_legal_fixture
 
 
 class LegalIntegrationTests(unittest.TestCase):
     def setUp(self):
         assert_no_audit_network(self)
+
+    def test_six_associated_entries_across_three_uikit_forms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_associated_legal_fixture(root)
+            before = {p.name: p.read_bytes() for p in root.iterdir()}
+            report = Auditor(root).run().report()
+            finding = next(f for f in report["findings"] if f["id"] == "LEGAL-001")
+            self.assertEqual(finding["status"], "PASS", finding)
+            self.assertEqual(len(finding["details"]), 6, finding)
+            for name in ("Gate.swift", "Profile.swift", "Locker.swift"):
+                entries = [d for d in finding["details"] if d["evidence"][0]["path"] == name]
+                self.assertEqual(len(entries), 2, (name, finding))
+                self.assertEqual(sum(d["label"].startswith("隐私协议") for d in entries), 1)
+                self.assertEqual(sum(d["label"].startswith("用户协议") for d in entries), 1)
+            self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
+            self.assertEqual(len(report["findings"]), 17)
+
+    def test_one_external_branch_cannot_be_hidden_by_other_entries(self):
+        for name in ("Locker.swift", "Profile.swift"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_associated_legal_fixture(root)
+                p = root / name
+                p.write_text(p.read_text().replace('navigationController?.pushViewController(DocumentPane(url: Links.terms, heading: "Terms & Support"), animated: true)', 'present(SFSafariViewController(url: Links.terms), animated: true)'))
+                finding = next(f for f in Auditor(root).run().report()["findings"] if f["id"] == "LEGAL-001")
+                self.assertEqual(finding["status"], "FAIL", finding)
+                self.assertEqual(len(finding["details"]), 6, finding)
+                failed = [d for d in finding["details"] if d["status"] == "FAIL"]
+                self.assertEqual(len(failed), 1, finding)
+                self.assertTrue(failed[0]["label"].startswith("用户协议"))
+                self.assertEqual(failed[0]["evidence"][0]["path"], name)
+
+    def test_dynamic_addresses_keep_six_associated_loading_implementations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_associated_legal_fixture(root)
+            p = root / "Document.swift"
+            p.write_text(p.read_text().replace('URL(string: "https://not-deployed.invalid/privacy")!', 'RemoteConfig.privacyURL').replace('URL(string: "https://not-deployed.invalid/support")!', 'RemoteConfig.termsURL'))
+            finding = next(f for f in Auditor(root).run().report()["findings"] if f["id"] == "LEGAL-001")
+            self.assertEqual(finding["status"], "PASS", finding)
+            self.assertEqual(len(finding["details"]), 6, finding)
+            self.assertTrue(all(d["url"] is None for d in finding["details"]))
 
     def test_navigation_wrapped_protocols_are_checked_without_network(self):
         with tempfile.TemporaryDirectory() as directory:

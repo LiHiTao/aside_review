@@ -2,7 +2,7 @@
 
 iOS A 面审核技能
 
-版本：**1.0.7**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
+版本：**1.0.8**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
 
 ## 安装
 
@@ -32,7 +32,7 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 
 完整规则见 [SKILL.md](SKILL.md) 与 [规则参考](references/rules.md)。其中：
 
-- 固定检查隐私协议及用户协议：入口必须关联应用内 WKWebView 加载，不检测协议部署或 URL 可访问性；不会构建或运行 App。
+- 固定检查隐私协议及用户协议：入口关联页面或封装存在 WKWebView 加载调用即可，不要求完整控制流、URL 字面量或挂载证明，不检测协议部署或 URL 可访问性；不会构建或运行 App。
 - 同一档位同时含 `id` 与 `productId` 时只统计真实商品 ID，不需修改项目字段名规避重复计数。
 - 档位按商品列表原有价格顺序，从默认 $0.99 起递增判断，不要求名称或商品 ID 包含序号。
 - 存在非空应用描述文案即通过描述检查，不要求包含内购用语。
@@ -47,7 +47,7 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
-测试使用模拟 GitHub 响应，协议审计禁止网络请求，不依赖公网，也不会修改已安装技能。开发者更新 `VERSION` 和发布说明后提交，再创建与版本相同的标签（例如 `v1.0.7`）。发布工作流会运行测试、核对标签与 VERSION，并创建带安装 ZIP 的正式 GitHub Release。只有 Release 发布成功后，使用者才会收到更新。
+测试使用模拟 GitHub 响应，协议审计禁止网络请求，不依赖公网，也不会修改已安装技能。开发者更新 `VERSION` 和发布说明后提交，再创建与版本相同的标签（例如 `v1.0.8`）。发布工作流会运行测试、核对标签与 VERSION，并创建带安装 ZIP 的正式 GitHub Release。只有 Release 发布成功后，使用者才会收到更新。
 
 首个发布标签为 `v1.0.0`。不要复用或移动已经发布的版本标签。
 

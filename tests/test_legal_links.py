@@ -5,6 +5,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from legal_links import analyze_legal_links
+try:
+    from .associated_legal_fixture import SOURCES
+except ImportError:
+    from associated_legal_fixture import SOURCES
 
 
 WRAPPER = '''
@@ -92,22 +96,22 @@ class LegalLinksTests(unittest.TestCase):
                               {'Config.swift': 'enum Config { static let privacyURL = "https://example.com/p" }'})
         self.assertEqual('PASS', result['status'])
 
-    def test_dynamic_url_stays_unknown(self):
+    def test_dynamic_url_does_not_block_associated_load(self):
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(url: config.remoteURL) }')
-        self.assertEqual('NOT_VERIFIABLE', result['status'])
+        self.assertEqual('PASS', result['status'])
         self.assertIsNone(result['url'])
 
-    def test_duplicate_constant_is_not_arbitrarily_selected(self):
+    def test_duplicate_url_constant_is_not_chosen_but_load_is_found(self):
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(url: URL(string: Config.privacyURL)!) }', {
             'One.swift': 'enum Config { static let privacyURL = "https://one.com/p" }',
             'Two.swift': 'enum Config { static let privacyURL = "https://two.com/p" }',
         })
-        self.assertEqual('NOT_VERIFIABLE', result['status'])
+        self.assertEqual('PASS', result['status'])
 
-    def test_wrong_loaded_url_fails(self):
+    def test_load_presence_does_not_compare_url_arguments(self):
         wrapper = WRAPPER.replace('URLRequest(url: url)', 'URLRequest(url: URL(string: "https://wrong.com")!)')
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(url: URL(string:"https://example.com/p")!) }', {'LegalPage.swift': wrapper})
-        self.assertEqual('FAIL', result['status'])
+        self.assertEqual('PASS', result['status'])
 
     def test_unused_webview_does_not_prove_entry(self):
         result = self.privacy('''Button("Privacy Policy") { showSomething() }
@@ -136,14 +140,14 @@ class LegalLinksTests(unittest.TestCase):
         }''')
         self.assertEqual('FAIL', result['status'])
 
-    def test_local_html_fails(self):
+    def test_local_html_loading_qualifies(self):
         wrapper = WRAPPER.replace('webView.load(URLRequest(url: url))', 'webView.loadHTMLString("<h1>Policy</h1>", baseURL: nil)')
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(url: URL(string:"https://example.com/p")!) }', {'LegalPage.swift': wrapper})
-        self.assertEqual('FAIL', result['status'])
+        self.assertEqual('PASS', result['status'])
 
-    def test_local_file_fails(self):
+    def test_local_file_loading_qualifies(self):
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(url: URL(fileURLWithPath:"policy.html")) }')
-        self.assertEqual('FAIL', result['status'])
+        self.assertEqual('PASS', result['status'])
 
     def test_link_default_fails(self):
         result = self.privacy('Link("Privacy Policy", destination: URL(string:"https://example.com/p")!)')
@@ -221,16 +225,16 @@ class LegalLinksTests(unittest.TestCase):
         result = self.scan('NavigationLink("Privacy Policy") { LegalPage(url: URL(string:"https://example.com/p")!) }', incomplete=True)
         self.assertTrue(all(r['status'] == 'NOT_VERIFIABLE' for r in result))
 
-    def test_unused_closure_and_unmounted_webview_do_not_pass(self):
+    def test_unused_closure_is_ignored_but_handler_and_branch_loads_count(self):
         for body in (
             'let unused = { let w = WKWebView(); w.load(URLRequest(url: URL(string:"https://example.com/p")!)) }',
             'let w = WKWebView(); w.load(URLRequest(url: URL(string:"https://example.com/p")!))',
             'if false { let w = WKWebView(); w.load(URLRequest(url: URL(string:"https://example.com/p")!)) }',
         ):
             with self.subTest(body=body):
-                self.assertEqual('NOT_VERIFIABLE', self.privacy('Button("Privacy Policy") { ' + body + ' }')['status'])
+                self.assertEqual('NOT_VERIFIABLE' if body.startswith('let unused') else 'PASS', self.privacy('Button("Privacy Policy") { ' + body + ' }')['status'])
 
-    def test_representable_must_return_loaded_instance(self):
+    def test_representable_load_does_not_require_returned_instance_proof(self):
         wrapper = '''struct LegalPage: UIViewRepresentable {
           let url: URL
           func makeUIView(context: Context) -> WKWebView {
@@ -240,16 +244,16 @@ class LegalLinksTests(unittest.TestCase):
           }
         }'''
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(url: URL(string:"https://example.com/p")!) }', {'LegalPage.swift': wrapper})
-        self.assertEqual('NOT_VERIFIABLE', result['status'])
+        self.assertEqual('PASS', result['status'])
 
-    def test_condition_cannot_hide_an_alternate_route(self):
+    def test_associated_external_branch_still_fails(self):
         wrapper = WRAPPER.replace('webView.load(URLRequest(url: url))', '''
           if useExternal { UIApplication.shared.open(url); return }
           webView.load(URLRequest(url: url))''')
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(url: URL(string:"https://example.com/p")!) }', {'LegalPage.swift': wrapper})
-        self.assertEqual('NOT_VERIFIABLE', result['status'])
+        self.assertEqual('FAIL', result['status'])
 
-    def test_unmounted_container_does_not_prove_presentation(self):
+    def test_associated_page_load_does_not_require_mount_proof(self):
         result = self.privacy('Button("Privacy Policy") { present(LegalController(url: URL(string:"https://example.com/p")!), animated:true) }', {
           'Controller.swift': '''class LegalController: UIViewController {
             let url: URL
@@ -261,7 +265,7 @@ class LegalLinksTests(unittest.TestCase):
             }
           }'''
         })
-        self.assertEqual('NOT_VERIFIABLE', result['status'])
+        self.assertEqual('PASS', result['status'])
 
     def test_direct_link_override(self):
         result = self.privacy('''struct Settings: View {
@@ -354,20 +358,20 @@ class LegalLinksTests(unittest.TestCase):
         self.assertEqual('PASS', result['status'])
         self.assertEqual('https://example.com/p', result['url'])
 
-    def test_explicit_initializer_binding(self):
+    def test_explicit_initializer_binding_without_url_comparison(self):
         wrapper = WRAPPER.replace('let url: URL', 'let url: URL\n init(documentURL: URL) { self.url = documentURL }')
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(documentURL: URL(string:"https://example.com/p")!) }', {'LegalPage.swift': wrapper})
         self.assertEqual('PASS', result['status'])
         self.assertEqual('https://example.com/p', result['url'])
         wrong = wrapper.replace('self.url = documentURL', 'self.url = URL(string:"https://wrong.com")!')
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(documentURL: URL(string:"https://example.com/p")!) }', {'LegalPage.swift': wrong})
-        self.assertEqual('FAIL', result['status'])
+        self.assertEqual('PASS', result['status'])
 
-    def test_dynamic_input_cannot_be_replaced_with_hardcoded_url(self):
+    def test_dynamic_input_still_allows_load_call_presence(self):
         wrapper = WRAPPER.replace('URLRequest(url: url)', 'URLRequest(url: URL(string:"https://wrong.com")!)')
         result = self.privacy('NavigationLink("Privacy Policy") { LegalPage(url: config.remoteURL) }', {'LegalPage.swift': wrapper})
-        self.assertEqual('NOT_VERIFIABLE', result['status'])
-        self.assertIsNone(result['url'])
+        self.assertEqual('PASS', result['status'])
+        self.assertEqual('https://wrong.com', result['url'])
 
     def test_bound_info_plist_key(self):
         result = self.privacy('''NavigationLink("Privacy Policy") {
@@ -398,7 +402,7 @@ class LegalLinksTests(unittest.TestCase):
         result = self.privacy('Button(privacyTitle) { openPrivacy() }')
         self.assertEqual('NOT_VERIFIABLE', result['status'])
 
-    def test_other_controller_view_assignment_not_mounted(self):
+    def test_associated_page_load_ignores_view_assignment_proof(self):
         result = self.privacy('Button("Privacy Policy") { present(LegalController(url: URL(string:"https://example.com/p")!), animated:true) }', {
           'Controller.swift': '''class LegalController: UIViewController {
             let url: URL
@@ -410,7 +414,7 @@ class LegalLinksTests(unittest.TestCase):
             }
           }'''
         })
-        self.assertEqual('NOT_VERIFIABLE', result['status'])
+        self.assertEqual('PASS', result['status'])
 
     def test_malformed_localization_cannot_be_missing_protocol_failure(self):
         source = '''VStack {
@@ -499,7 +503,7 @@ class LegalLinksTests(unittest.TestCase):
         self.assertEqual('FAIL', result['status'])
         self.assertEqual('https://example.com/privacy', result['url'])
 
-    def test_navigation_mutation_and_aliases_invalidate_only_presented_container(self):
+    def test_explicit_navigation_replacement_with_safari_still_fails(self):
         for mutation in ('nav.setViewControllers([other], animated: false)', 'nav.viewControllers = [other]', 'let alias = nav; alias.setViewControllers([other], animated: false)'):
             for order in ('before', 'after'):
                 with self.subTest(mutation=mutation, order=order):
@@ -507,9 +511,10 @@ class LegalLinksTests(unittest.TestCase):
                     result = self.privacy('''Button("Privacy Policy") {
                       let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
                       let nav = UINavigationController(rootViewController: pane)
+                      let other = SFSafariViewController(url: URL(string: "https://example.com/terms")!)
                       ''' + action + '''
                     }''', {'LegalPane.swift': LEGAL_PANE})
-                    self.assertEqual('NOT_VERIFIABLE', result['status'])
+                    self.assertEqual('FAIL', result['status'])
         result = self.privacy('''Button("Privacy Policy") {
           let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
           let unused = UINavigationController(rootViewController: pane)
@@ -585,19 +590,20 @@ class LegalLinksTests(unittest.TestCase):
         result = self.scan(action, {'LegalPane.swift': pane})
         self.assertTrue(next(r for r in result if r['kind'] == 'terms').get('missing'))
 
-    def test_optional_forced_and_self_navigation_mutations_invalidate_root(self):
+    def test_optional_navigation_replacement_with_safari_still_fails(self):
         for prefix in ('nav?', 'nav!', 'self.nav?', 'self.nav!'):
             for suffix in ('.setViewControllers([other], animated: false)', '.viewControllers = [other]'):
                 with self.subTest(receiver=prefix, operation=suffix):
                     declaration = ('self.nav = ' if prefix.startswith('self.') else 'var nav: UINavigationController? = ')
                     result = self.privacy('''Button("Privacy Policy") {
                       let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
+                      let other = SFSafariViewController(url: URL(string: "https://example.com/terms")!)
                       ''' + declaration + '''UINavigationController(rootViewController: pane)
                       ''' + prefix + suffix + '''
                       present(nav!, animated: true)
                     }''', {'LegalPane.swift': LEGAL_PANE})
-                    self.assertEqual('NOT_VERIFIABLE', result['status'])
-                    self.assertIsNone(result['url'])
+                    self.assertEqual('FAIL', result['status'])
+                    self.assertEqual('https://example.com/terms', result['url'])
         result = self.privacy('''Button("Privacy Policy") {
           let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
           var nav: UINavigationController? = UINavigationController(rootViewController: pane)
@@ -605,6 +611,113 @@ class LegalLinksTests(unittest.TestCase):
           present(nav!, animated: true)
         }''', {'LegalPane.swift': LEGAL_PANE})
         self.assertEqual('PASS', result['status'])
+
+    def test_associated_initializer_load_counts_without_lifecycle(self):
+        pane = '''class Pane: UIViewController {
+          init() {
+            let browser = WKWebView()
+            browser.loadHTMLString("<h1>Terms</h1>", baseURL: nil)
+            super.init(nibName: nil, bundle: nil)
+          }
+        }'''
+        result = self.privacy('NavigationLink("Privacy Policy") { Pane() }', {'Pane.swift': pane})
+        self.assertEqual('PASS', result['status'])
+        no_load = pane.replace('browser.loadHTMLString("<h1>Terms</h1>", baseURL: nil)', '')
+        result = self.privacy('NavigationLink("Privacy Policy") { Pane() }', {'Pane.swift': no_load})
+        self.assertEqual('NOT_VERIFIABLE', result['status'])
+
+    def test_scoped_openurl_loading_does_not_require_handled_return(self):
+        result = self.privacy('''Link("Privacy Policy", destination: URL(string:"https://example.com")!)
+          .environment(\\.openURL, OpenURLAction { url in
+            let web = WKWebView()
+            web.loadHTMLString("<p>Policy</p>", baseURL: nil)
+            return .discarded
+          })''')
+        self.assertEqual('PASS', result['status'])
+
+    def test_unused_sibling_button_binding_cannot_lend_action(self):
+        source = '''class Settings: UIViewController {
+          func setup() { let button = UIButton(); button.setTitle("Privacy Policy", for: .normal) }
+          func unused() { let button = UIButton(); button.addTarget(self, action: #selector(openLegal), for: .touchUpInside) }
+          @objc func openLegal() { present(Pane(), animated: true) }
+        }'''
+        pane = 'class Pane: UIViewController { func viewDidLoad() { let web = WKWebView(); web.loadHTMLString("policy", baseURL: nil) } }'
+        self.assertEqual('NOT_VERIFIABLE', self.privacy(source, {'Pane.swift': pane})['status'])
+
+    def test_unused_helper_local_wk_type_is_not_a_page_member(self):
+        pane = '''class Pane: UIViewController {
+          let web = FakeLoader()
+          func viewDidLoad() { web.load(request) }
+          func unused() { let web: WKWebView = WKWebView() }
+        }'''
+        self.assertEqual('NOT_VERIFIABLE', self.privacy('NavigationLink("Privacy Policy") { Pane() }', {'Pane.swift': pane})['status'])
+
+    def test_three_general_ui_patterns_produce_six_entries(self):
+        result = self.scan('', SOURCES)
+        self.assertEqual(6, len(result))
+        self.assertEqual(['PASS'] * 6, [r['status'] for r in result])
+        self.assertEqual({'Gate.swift', 'Profile.swift', 'Locker.swift'}, {r['evidence'][0]['path'] for r in result})
+        self.assertEqual(3, sum(r['kind'] == 'privacy' for r in result))
+        self.assertEqual(3, sum(r['kind'] == 'terms' for r in result))
+
+    def test_factory_identifier_dispatch_does_not_borrow_neighbor_case(self):
+        fixture = dict(SOURCES)
+        fixture['Locker.swift'] = fixture['Locker.swift'].replace('makeLink("Privacy Policy", id: "privacy")', 'makeLink("Privacy Policy", id: "unmapped")')
+        results = self.scan('', fixture)
+        locker = [r for r in results if r['evidence'][0]['path'] == 'Locker.swift']
+        self.assertEqual(['NOT_VERIFIABLE', 'PASS'], [r['status'] for r in locker])
+        fixture = dict(SOURCES)
+        fixture['Locker.swift'] = fixture['Locker.swift'].replace('case "privacy":\n            navigationController?.pushViewController(DocumentPane(url: Links.privacy, heading: "Privacy Policy"), animated: true)', 'case "privacy":\n            present(SFSafariViewController(url: Links.privacy), animated: true)')
+        results = self.scan('', fixture)
+        self.assertEqual(1, sum(r['status'] == 'FAIL' for r in results))
+        failed = next(r for r in results if r['status'] == 'FAIL')
+        self.assertEqual('privacy', failed['kind'])
+        self.assertEqual('Locker.swift', failed['evidence'][0]['path'])
+
+    def test_unused_button_factory_adds_no_protocol_entries(self):
+        fixture = dict(SOURCES)
+        fixture['Locker.swift'] = fixture['Locker.swift'].replace('column.addArrangedSubview(makeLink("Privacy Policy", id: "privacy"))', '').replace('column.addArrangedSubview(makeLink("Terms & Support", id: "support"))', '')
+        self.assertEqual(4, len(self.scan('', fixture)))
+
+    def test_table_sections_and_unparsed_row_condition_do_not_cross_associate(self):
+        for replacement in ('ActionSection(rawValue: indexPath.section)!', 'Section(rawValue: indexPath.section + 1)!'):
+            fixture = dict(SOURCES)
+            original = fixture['Profile.swift']
+            split = original.index('func tableView(_ tableView: UITableView, didSelectRowAt')
+            fixture['Profile.swift'] = original[:split] + original[split:].replace('Section(rawValue: indexPath.section)!', replacement)
+            table = [r for r in self.scan('', fixture) if r['evidence'][0]['path'] == 'Profile.swift']
+            self.assertEqual(['NOT_VERIFIABLE', 'NOT_VERIFIABLE'], [r['status'] for r in table])
+        fixture = dict(SOURCES)
+        fixture['Profile.swift'] = fixture['Profile.swift'].replace('indexPath.row == 0', 'indexPath.row % 2 == 0')
+        table = [r for r in self.scan('', fixture) if r['evidence'][0]['path'] == 'Profile.swift']
+        self.assertEqual(['NOT_VERIFIABLE', 'NOT_VERIFIABLE'], [r['status'] for r in table])
+
+    def test_factory_dispatch_ignores_switch_in_uncalled_closure(self):
+        fixture = dict(SOURCES)
+        source = fixture['Locker.swift']
+        start = source.index('        switch sender.accessibilityIdentifier')
+        end = source.rindex('\n    }\n}')
+        original_dispatch = source[start:end]
+        fixture['Locker.swift'] = source[:start] + '        let unused = {\n' + original_dispatch + '\n        }\n' + '''
+          switch sender.accessibilityIdentifier {
+          case "privacy": print("No route")
+          case "support": print("No route")
+          default: break
+          }
+        ''' + source[end:]
+        locker = [r for r in self.scan('', fixture) if r['evidence'][0]['path'] == 'Locker.swift']
+        self.assertEqual(['NOT_VERIFIABLE', 'NOT_VERIFIABLE'], [r['status'] for r in locker])
+
+    def test_table_dispatch_ignores_uncalled_nested_function(self):
+        fixture = dict(SOURCES)
+        source = fixture['Profile.swift']
+        start = source.index('    func tableView(_ tableView: UITableView, didSelectRowAt')
+        dispatch = source[start:]
+        dispatch = dispatch.replace('            if indexPath.row == 0 {', '            func unused() {\n            if indexPath.row == 0 {')
+        dispatch = dispatch.replace('            }\n        }\n    }', '            }\n            }\n        }\n    }')
+        fixture['Profile.swift'] = source[:start] + dispatch
+        table = [r for r in self.scan('', fixture) if r['evidence'][0]['path'] == 'Profile.swift']
+        self.assertEqual(['NOT_VERIFIABLE', 'NOT_VERIFIABLE'], [r['status'] for r in table])
 
 
 if __name__ == '__main__':

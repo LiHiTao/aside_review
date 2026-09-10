@@ -1,9 +1,9 @@
-"""Conservative source association for in-app legal-document navigation.
+"""Find WKWebView loading calls associated with legal-document UI entries.
 
-This is a bounded Swift/Objective-C analyser, not a compiler. Balanced lexical
-scopes and unique argument/constant bindings are required for a positive result;
-unsupported routing is reported as NOT_VERIFIABLE rather than inferred from a
-nearby WKWebView name. No code is executed and no network request is made here.
+Balanced source scopes associate an entry with its page or called helpers. URL
+literals, view mounting and complete runtime control flow are not prerequisites.
+Unrelated WebViews, prose and uncalled helper bodies do not supply evidence.
+No code is executed and no network request is made here.
 """
 from __future__ import annotations
 
@@ -207,6 +207,67 @@ def _simple_receiver(source, index):
     return source.tokens[j].text
 
 
+def _control_bodies(source, begin, end):
+    result = set()
+    for i in range(begin, end):
+        if source.tokens[i].text in ("if", "else", "guard", "switch", "for", "while", "do", "catch"):
+            opening = next((j for j in range(i + 1, end) if source.tokens[j].text == "{"), None)
+            if opening in source.pairs:
+                result.add(opening)
+    return result
+
+
+def _execution_indices(source, begin, end):
+    """Visit ordinary control blocks, excluding nested declarations/closures."""
+    controls = _control_bodies(source, begin, end)
+    i = begin
+    while i < end:
+        if source.tokens[i].text == "func":
+            opening = next((j for j in range(i + 1, end) if source.tokens[j].text == "{"), None)
+            if opening in source.pairs:
+                i = source.pairs[opening] + 1
+                continue
+        if source.tokens[i].text == "{" and i in source.pairs:
+            if i in controls:
+                yield from _execution_indices(source, i + 1, source.pairs[i])
+            i = source.pairs[i] + 1
+            continue
+        yield i
+        i += 1
+
+
+def _switches(source, begin, end):
+    """Yield balanced switch expressions and their immediate case bodies."""
+    for i in _execution_indices(source, begin, end):
+        if source.tokens[i].text != "switch":
+            continue
+        opening = next((j for j in range(i + 1, end) if source.tokens[j].text == "{"), None)
+        if opening not in source.pairs:
+            continue
+        close = source.pairs[opening]
+        cases = []
+        j = opening + 1
+        while j < close:
+            if source.tokens[j].text in ("case", "default"):
+                colon = next((k for k in range(j + 1, close) if source.tokens[k].text == ":"), None)
+                if colon is None:
+                    break
+                cases.append((j + 1, colon, colon + 1))
+                j = colon + 1
+                continue
+            if j in source.pairs and source.pairs[j] > j:
+                j = source.pairs[j]
+            j += 1
+        spans = [(a, b, c, cases[n + 1][0] - 1 if n + 1 < len(cases) else close)
+                 for n, (a, b, c) in enumerate(cases)]
+        yield source.text(i + 1, opening), spans
+
+
+def _row_predicate(expression, parameter):
+    match = re.fullmatch(re.escape(parameter) + r"\.(row|section)(==|!=)(\d+)", expression)
+    return (match[1], match[2] + match[3]) if match else None
+
+
 class Analyzer:
     def __init__(self, root, source_texts, all_texts, scan_incomplete):
         self.root = root.resolve()
@@ -323,12 +384,13 @@ class Analyzer:
             for i, token in enumerate(s.tokens):
                 owner = next((d.name for d in reversed(types) if d.begin <= i < d.end), None)
                 paren = i + (1 if token.text == "init" else 2)
-                if token.text in ("func", "init") and paren < len(s.tokens) and s.tokens[paren].text == "(" and paren in s.pairs:
+                declaration = token.text == "func" or (token.text == "init" and (i == 0 or s.tokens[i - 1].text != "."))
+                if declaration and paren < len(s.tokens) and s.tokens[paren].text == "(" and paren in s.pairs:
                     close = s.pairs[paren]
                     j = close + 1
                     while j < len(s.tokens) and s.tokens[j].text not in ("{", "}", ";", "func"):
                         j += 1
-                    if j not in s.pairs:
+                    if j not in s.pairs or s.tokens[j].text != "{":
                         continue
                     params = []
                     for a, b in _split(s, paren + 1, close):
@@ -395,6 +457,8 @@ class Analyzer:
             return Value(type_name=name, args=args)
         # Objective-C NSURL / NSURLRequest expressions; brackets are balanced.
         if s.tokens[a].text == "[" and s.pairs.get(a) == b - 1:
+            if s.path.suffix == ".swift":
+                return Value(type_name="Array", args={str(i): self.value(s, x, y, env, seen.copy()) for i, (x, y) in enumerate(_split(s, a + 1, b - 1))})
             call = _objc_call(s, a, b)
             if call:
                 selector, receiver, arguments = call
@@ -455,19 +519,10 @@ class Analyzer:
 
     def outcome(self, status, actual, url=None, evidence=None):
         return {"status": status, "actual": actual, "url": url, "evidence": evidence or [],
-                "manual_check": "在源码或 App 中核对该协议入口实际传递的 URL 与 WKWebView 加载链。" if status == "NOT_VERIFIABLE" else None}
+                "manual_check": "核对协议入口关联的页面或共用封装是否存在 WKWebView 加载调用。" if status == "NOT_VERIFIABLE" else None}
 
-    def loaded(self, value, s, index, expected=None):
-        evidence = [self.evidence(s, index)]
-        if value.text is None:
-            return self.outcome("NOT_VERIFIABLE", "WKWebView 已关联，但 URL 是动态表达式或绑定无法唯一解析。", evidence=evidence)
-        if expected and expected.text is not None and value.text != expected.text:
-            return self.outcome("FAIL", "协议入口传入的 URL 未被实际加载，WKWebView 加载了另一个地址。", value.text, evidence)
-        if expected is not None and expected.text is None:
-            return self.outcome("NOT_VERIFIABLE", "入口 URL 为动态参数，不能确认封装实际加载地址与该参数一致。", evidence=evidence)
-        if value.text.startswith("file:"):
-            return self.outcome("FAIL", "协议使用本地文件，未通过 WKWebView 加载网页 URL。", value.text, evidence)
-        return self.outcome("PASS", "协议入口、URL 参数和应用内 WKWebView 加载链有明确静态关联。", value.text, evidence)
+    def loaded(self, value, s, index):
+        return self.outcome("PASS", "协议关联页面或已调用方法中存在 WKWebView 加载调用。", value.text, [self.evidence(s, index)])
 
     def _bind(self, definition, arguments):
         env = dict(arguments)
@@ -510,52 +565,22 @@ class Analyzer:
         initializers = [f for f in self.definitions if f.kind == "func" and f.source is d.source and f.owner == d.name and f.name == "init"]
         if initializers:
             matching = [f for f in initializers if set(value.args) <= {label for label, _, _ in f.params}]
-            if len(matching) != 1:
-                return [self.outcome("NOT_VERIFIABLE", "页面封装构造器无法唯一匹配，不能确认 URL 属性绑定。", evidence=[self.evidence(s, index)])]
-            constructor = matching[0]
-            arguments = self._bind(constructor, value.args)
-            properties = {}
-            cs = constructor.source
-            for j in range(constructor.begin, constructor.end - 4):
-                if cs.tokens[j].text in ("if", "switch", "guard", "for", "while"):
-                    return [self.outcome("NOT_VERIFIABLE", "页面构造器包含条件或动态属性赋值，不能唯一绑定协议 URL。", evidence=[self.evidence(cs, j)])]
-                if cs.text(j, j + 2) == "self." and cs.tokens[j + 3].text == "=":
-                    properties[cs.tokens[j + 2].text] = self.value(cs, j + 4, _end_expr(cs, j + 4, constructor.end), arguments)
+            if len(matching) == 1:
+                constructor = matching[0]
+                arguments = self._bind(constructor, value.args)
+                cs = constructor.source
+                for j in range(constructor.begin, constructor.end - 4):
+                    if cs.text(j, j + 2) == "self." and cs.tokens[j + 3].text == "=":
+                        properties[cs.tokens[j + 2].text] = self.value(cs, j + 4, _end_expr(cs, j + 4, constructor.end), arguments)
         methods = [f for f in self.definitions if f.kind == "func" and f.source is d.source and f.owner == d.name
                    and f.name in ("makeUIView", "updateUIView", "makeUIViewController", "updateUIViewController", "viewDidLoad", "loadView")]
-        url_args = [v for k, v in value.args.items() if re.search(r"url|link|address", k, re.I)]
-        expected = url_args[0] if len(url_args) == 1 else None
         results = []
+        if constructor:
+            results += self.trace(constructor.source, constructor.begin, constructor.end,
+                                  arguments, seen, destination=True)
         for method in methods:
-            env = self._bind(method, properties)
-            mounted = set()
-            ms = method.source
-            if method.name == "updateUIView":
-                mounted = {name for _, name, type_name in method.params if type_name.startswith("WKWebView")}
-            elif method.name == "makeUIView":
-                returns = [j for j in range(method.begin, method.end) if ms.tokens[j].text == "return"]
-                if len(returns) == 1:
-                    j = returns[0] + 1
-                    k = _end_expr(ms, j, method.end)
-                    if k == j + 1:
-                        mounted.add(ms.tokens[j].text)
-            elif method.name in ("viewDidLoad", "loadView"):
-                for j in range(method.begin, method.end - 3):
-                    if ms.tokens[j].text == "addSubview" and ms.tokens[j + 1].text == "(" and ms.pairs.get(j + 1) == j + 3:
-                        start = j - 2
-                        while start >= method.begin + 2 and ms.tokens[start - 1].text == ".":
-                            start -= 2
-                        if ms.text(start, j - 1) in ("view", "self.view"):
-                            mounted.add(ms.tokens[j + 2].text)
-                    if ms.tokens[j].text == "view" and ms.tokens[j + 1].text == "=":
-                        if j == method.begin or ms.tokens[j - 1].text != "." or (j >= method.begin + 2 and ms.tokens[j - 2].text == "self"):
-                            mounted.add(ms.tokens[j + 2].text)
-                    if ms.tokens[j].text == "[" and j in ms.pairs:
-                        call = _objc_call(ms, j, ms.pairs[j] + 1)
-                        if call and call[0] == "addSubview" and call[2] and ms.text(*call[1]) in ("self.view", "[selfview]"):
-                            mounted.add(ms.text(call[2][0][1], call[2][0][2]).removeprefix("self."))
-            results += self.trace(method.source, method.begin, method.end, env, seen,
-                                  expected=expected, destination=True, mounted=mounted)
+            results += self.trace(method.source, method.begin, method.end,
+                                  self._bind(method, properties), seen, destination=True)
         # SwiftUI view composition (NavigationLink -> wrapper View -> representable).
         if not methods:
             for j in range(d.begin, d.end - 2):
@@ -563,7 +588,7 @@ class Analyzer:
                     brace = next((k for k in range(j + 2, d.end) if d.source.tokens[k].text == "{"), None)
                     if brace in d.source.pairs:
                         results += self.trace(d.source, brace + 1, d.source.pairs[brace], properties, seen,
-                                              expected=expected, destination=True)
+                                              destination=True)
         displayed_kind = self._displayed_protocol(properties, methods, constructor, arguments)
         if displayed_kind:
             if not results:
@@ -587,8 +612,6 @@ class Analyzer:
             if method.name not in ("init", "viewDidLoad", "loadView"):
                 continue
             s = method.source
-            if any(s.tokens[i].text in ("if", "switch", "guard", "while", "for") for i in range(method.begin, method.end)):
-                return None
             env = dict(constructor_arguments or {}) if method is constructor else dict(properties)
             local_names = {name for _, name, _ in method.params}
             i = method.begin
@@ -658,15 +681,12 @@ class Analyzer:
         code = s.text(body, close)
         if re.search(r"return\.systemAction\b", code):
             return [self.outcome("FAIL", "协议 openURL 自定义处理返回 systemAction，仍交由系统浏览器打开。", value.text)]
-        if not re.search(r"return\.handled\b", code):
-            return []
         return self.trace(s, body, close, {**env, param: value}, seen, modifier_index=entry_index)
 
-    def trace(self, s, a, b, env=None, seen=None, expected=None, destination=False, mounted=None, modifier_index=None):
+    def trace(self, s, a, b, env=None, seen=None, destination=False, modifier_index=None):
         env = dict(env or {})
         seen = seen or set()
         results = []
-        mounted = set(mounted or ())
         # Evaluate assignments in execution order. In particular, a URL changed
         # after a load/presentation must never be retroactively used for it.
         assignments = set()
@@ -678,12 +698,13 @@ class Analyzer:
                 d = types[0]
                 for i in range(d.begin, d.end - 2):
                     if s.tokens[i].text in ("var", "let") and s.tokens[i + 2].text == ":" and i + 3 < d.end and s.tokens[i + 3].text == "WKWebView":
-                        env.setdefault(s.tokens[i + 1].text, Value(type_name="WKWebView"))
+                        is_member = self.owner(s, i) == d.name and not any(f.kind == "func" and f.source is s and f.begin <= i < f.end for f in self.definitions)
+                        if is_member:
+                            env.setdefault(s.tokens[i + 1].text, Value(type_name="WKWebView"))
+        control_bodies = _control_bodies(s, a, b)
         i = a
         while i < b:
             token = s.tokens[i]
-            if token.text in ("if", "guard", "switch", "for", "while", "catch"):
-                results.append(self.outcome("NOT_VERIFIABLE", "协议处理链包含条件、循环或异常分支，当前静态模式不能确认所有实际打开路径。", evidence=[self.evidence(s, i)]))
             name = token.text
             equals = i + 1
             if token.text in ("let", "var") and i + 2 < b:
@@ -696,16 +717,15 @@ class Analyzer:
                     name = s.tokens[i + 1].text
                     equals = candidate
             if equals < b and s.tokens[equals].text == "=" and (equals + 1 >= b or s.tokens[equals + 1].text != "="):
-                if name == "viewControllers" and i >= a + 2 and s.tokens[i - 1].text == ".":
+                end = _end_expr(s, equals + 1, b)
+                val = self.value(s, equals + 1, end, env)
+                if name == "viewControllers":
                     container = env.get(_simple_receiver(s, i) or "", Value())
                     if container.type_name in ("UINavigationController", "UIKit.UINavigationController"):
-                        container.args.clear()
-                end = _end_expr(s, equals + 1, b)
-                env[name] = self.value(s, equals + 1, end, env)
+                        container.args["rootViewController"] = val.args.get("0", Value()) if val.type_name == "Array" and len(val.args) == 1 else Value()
+                env[name] = val
                 if s.text(equals + 1, end) == "true":
                     env[name] = Value(text="true")
-                if name in assignments and name in mounted:
-                    results.append(self.outcome("NOT_VERIFIABLE", "同一 WebView 引用被多次赋值，无法确认已展示实例与加载实例相同。", evidence=[self.evidence(s, i)]))
                 assignments.add(name)
                 i = end
                 continue
@@ -717,14 +737,10 @@ class Analyzer:
                     receiver_name = s.text(*receiver_span).removeprefix("self.")
                     args = {label: self.value(s, x, y, env) for label, x, y in arguments}
                     receiver_value = env.get(receiver_name, Value())
-                    if selector in ("setViewControllers", "pushViewController", "popViewControllerAnimated", "popToRootViewControllerAnimated", "popToViewController") and receiver_value.type_name in ("UINavigationController", "UIKit.UINavigationController"):
-                        receiver_value.args.clear()
-                        i = close + 1
-                        continue
-                    if selector == "loadRequest" and receiver_value.type_name == "WKWebView" and receiver_name in mounted:
-                        results.append(self.loaded(args.get("loadRequest", Value()), s, i, expected))
-                    elif selector in ("loadHTMLString", "loadFileURL") and receiver_value.type_name == "WKWebView" and receiver_name in mounted:
-                        results.append(self.outcome("FAIL", "协议通过 WKWebView 加载本地 HTML 或文件。", "", [self.evidence(s, i)]))
+                    if selector == "loadRequest" and receiver_value.type_name == "WKWebView":
+                        results.append(self.loaded(args.get("loadRequest", Value()), s, i))
+                    elif selector in ("loadHTMLString", "loadFileURL") and receiver_value.type_name == "WKWebView":
+                        results.append(self.loaded(args.get("loadFileURL", Value()) if selector == "loadFileURL" else Value(), s, i))
                     elif selector in ("presentViewController", "pushViewController"):
                         target = args.get(selector, Value())
                         if selector == "pushViewController" and target.type_name in ("UINavigationController", "UIKit.UINavigationController"):
@@ -741,7 +757,7 @@ class Analyzer:
                             d = methods[0]
                             key = (d.source.path, d.start)
                             if key not in seen:
-                                results += self.trace(d.source, d.begin, d.end, env, seen | {key}, expected, destination, mounted)
+                                results += self.trace(d.source, d.begin, d.end, env, seen | {key}, destination=destination)
                 i = close + 1
                 continue
             # Skip nested declarations/closures unless invoked or explicitly used
@@ -752,32 +768,32 @@ class Analyzer:
                     i = definition.end + 1
                     continue
             if token.text == "{" and i in s.pairs:
-                # Closures and conditional branches are not guaranteed execution.
-                # Known declarative container bodies may compose child views.
+                # Ordinary branches are searched for call existence. Uncalled
+                # closures stay excluded; this does not prove runtime execution.
                 before = s.tokens[i - 1].text if i else ""
-                if destination and before in ("VStack", "HStack", "ZStack", "Group", "ScrollView", "NavigationStack", "NavigationView"):
-                    results += self.trace(s, i + 1, s.pairs[i], env, seen, expected, True, mounted)
+                if i in control_bodies or (destination and before in ("VStack", "HStack", "ZStack", "Group", "ScrollView", "NavigationStack", "NavigationView")):
+                    results += self.trace(s, i + 1, s.pairs[i], env, seen, destination=destination)
                 i = s.pairs[i] + 1
                 continue
             if i + 1 < b and s.tokens[i + 1].text == "(" and i + 1 in s.pairs:
                 close = s.pairs[i + 1]
                 args = {label: self.value(s, x, y, env) for label, x, y in _args(s, i + 2, close)}
                 receiver = _simple_receiver(s, i)
-                container = env.get(receiver or "", Value())
-                if token.text in ("setViewControllers", "pushViewController", "popViewController", "popToRootViewController", "popToViewController") and container.type_name in ("UINavigationController", "UIKit.UINavigationController"):
-                    container.args.clear()
+                if token.text == "setViewControllers":
+                    container = env.get(receiver or "", Value())
+                    if container.type_name in ("UINavigationController", "UIKit.UINavigationController"):
+                        val = args.get("_", Value())
+                        container.args["rootViewController"] = val.args.get("0", Value()) if val.type_name == "Array" and len(val.args) == 1 else Value()
                     i = close + 1
                     continue
                 if token.text in ("loadHTMLString", "loadFileURL"):
                     receiver_value = env.get(receiver or "", Value())
                     if receiver_value.type_name == "WKWebView":
-                        if receiver in mounted:
-                            local_url = args.get("_", Value()).text if token.text == "loadFileURL" else ""
-                            results.append(self.outcome("FAIL", "协议通过 WKWebView 加载本地 HTML 或文件，未加载网页 URL。", local_url or "", [self.evidence(s, i)]))
+                        results.append(self.loaded(args.get("_", Value()) if token.text == "loadFileURL" else Value(), s, i))
                 elif token.text == "load":
                     receiver_value = env.get(receiver or "", self.value(s, max(a, i - 2), i - 1, env) if receiver else Value())
-                    if receiver_value.type_name == "WKWebView" and receiver in mounted:
-                        results.append(self.loaded(args.get("_", args.get("request", Value())), s, i, expected))
+                    if receiver_value.type_name == "WKWebView":
+                        results.append(self.loaded(args.get("_", args.get("request", Value())), s, i))
                 elif token.text in ("openURL", "open"):
                     before = s.text(max(a, i - 7), i)
                     is_external = token.text == "openURL" or "UIApplication.shared." in before or "UIApplication.sharedApplication" in before
@@ -815,9 +831,7 @@ class Analyzer:
                         key = (d.source.path, d.start)
                         if key not in seen:
                             bound = {**env, **self._bind(d, args)}
-                            helper_mounted = mounted | {name for name, val in bound.items()
-                                                        if any(val is env.get(mount) for mount in mounted)}
-                            results += self.trace(d.source, d.begin, d.end, bound, seen | {key}, expected, destination, helper_mounted)
+                            results += self.trace(d.source, d.begin, d.end, bound, seen | {key}, destination=destination)
                 i = close + 1
                 continue
             i += 1
@@ -828,26 +842,26 @@ class Analyzer:
                 arguments = _args(s, x, y)
                 state = next(((label, s.text(va, vb).lstrip("$")) for label, va, vb in arguments if label in ("isPresented", "item")), None)
                 if state and state[1] in assignments and (state[0] == "item" or env[state[1]].text == "true"):
-                    results += self.trace(s, after + 1, end - 1, env, seen, expected, destination=True)
+                    results += self.trace(s, after + 1, end - 1, env, seen, destination=True)
         return results
 
     def _entry_result(self, kind, s, index, results, fallback_url=None):
         self.entry_locations.add((s.path, index))
         evidence = [self.evidence(s, index)]
-        for result in results:
-            if result["status"] == "PASS" and any("rootViewController" not in container.args for container in result.get("_containers", [])):
-                result.update(status="NOT_VERIFIABLE", url=None,
-                              actual="已展示的导航控制器页面栈发生变更，不能沿用初始化时的协议根页面。",
-                              manual_check="核对导航控制器实际展示的页面栈及对应协议 URL。")
+        for result in list(results):
+            for container in result.get("_containers", []):
+                root = container.args.get("rootViewController", Value())
+                if root.type_name in ("SFSafariViewController", "SafariView", "SafariViewController"):
+                    results.append(self.outcome("FAIL", "协议关联导航控制器被明确切换到 Safari 页面。", root.args.get("url", Value()).text, evidence))
         if not results:
-            result = self.outcome("NOT_VERIFIABLE", "已发现协议操作入口，但当前支持的静态模式无法关联完整的页面、参数与 WKWebView 加载链。", fallback_url, evidence)
+            result = self.outcome("NOT_VERIFIABLE", "已发现协议操作入口，但尚未关联到 WKWebView 加载调用。", fallback_url, evidence)
         else:
             order = {"FAIL": 0, "NOT_VERIFIABLE": 1, "PASS": 2}
             result = dict(min(results, key=lambda r: order[r["status"]]))
             result["evidence"] = evidence + [e for r in results for e in r["evidence"] if e not in evidence]
             urls = {r["url"] for r in results if r["url"] is not None}
             if len(urls) > 1 and result["status"] == "PASS":
-                result = self.outcome("NOT_VERIFIABLE", "同一协议入口关联多个不同加载地址，无法唯一确定实际 URL。", evidence=result["evidence"])
+                result["url"] = None  # URL details are optional; load-call presence is the rule.
         if self.incomplete and result["status"] == "PASS":
             result.update(status="NOT_VERIFIABLE", actual="源码读取或词法结构不完整，不能确认协议加载链完整。",
                           manual_check="补齐源码或修复读取问题后重新检查协议入口。")
@@ -923,6 +937,8 @@ class Analyzer:
                     kind = "terms"
                 self._entry_result(kind, s, i, results, fallback_url)
             self._uikit(s)
+            self._table_entries(s)
+            self._factory_entries(s)
             self._fallback_candidates(s)
         for kind, title in (("privacy", "隐私协议"), ("terms", "用户协议")):
             if not any(entry["kind"] == kind for entry in self.entries):
@@ -948,6 +964,8 @@ class Analyzer:
             methods = []
             for j in range(2, len(s.tokens) - 2):
                 if s.tokens[j].text != "addTarget" or s.tokens[j - 2].text != receiver or s.tokens[j - 1].text != "." or self.owner(s, j) != owner:
+                    continue
+                if self._binding_key(s, i, receiver) != self._binding_key(s, j, receiver):
                     continue
                 if j + 1 not in s.pairs:
                     continue
@@ -1000,6 +1018,157 @@ class Analyzer:
                 kind = "terms"
             self._entry_result(kind, s, i, results)
 
+    def _binding_key(self, s, index, name):
+        scopes = s.ancestors(index)
+        visible = [c for c in self.constants if c[0] is s and c[1] == name and c[3] < index
+                   and all(scope in scopes for scope in s.ancestors(c[3]))]
+        if visible:
+            chosen = max(visible, key=lambda c: (len(s.ancestors(c[3])), c[3]))
+            return ("declaration", chosen[3])
+        parameters = [d for d in self.definitions if d.source is s and d.kind == "func" and d.begin <= index < d.end
+                      and any(param == name for _, param, _ in d.params)]
+        if parameters:
+            return ("parameter", parameters[0].start, name)
+        return ("property", self.owner(s, index), name)
+
+    def _table_context(self, s, index, method, parameter):
+        context = {}
+        for expression, cases in _switches(s, method.begin, method.end):
+            selector = next((field for field in ("section", "row") if parameter + "." + field in expression), None)
+            if selector is None:
+                continue
+            for a, b, begin, end in cases:
+                if begin <= index < end:
+                    value = s.text(a, b)
+                    discriminator = expression.replace(parameter + ".", "$index.")
+                    context[selector] = (discriminator, "==" + value if value.isdigit() else value)
+        for j in range(method.begin, method.end):
+            if s.tokens[j].text != "if":
+                continue
+            opening = next((k for k in range(j + 1, method.end) if s.tokens[k].text == "{"), None)
+            if opening not in s.pairs:
+                continue
+            predicate = _row_predicate(s.text(j + 1, opening), parameter)
+            if predicate is None:
+                if parameter + ".row" in s.text(j + 1, opening) and opening < index < s.pairs[opening]:
+                    context["unresolved_row"] = True
+                continue
+            close = s.pairs[opening]
+            if opening < index < close:
+                context[predicate[0]] = predicate[1]
+            elif close + 2 < method.end and s.text(close + 1, close + 3) == "else{" and close + 2 in s.pairs and close + 2 < index < s.pairs[close + 2]:
+                context[predicate[0]] = ("!=" if predicate[1].startswith("==") else "==") + predicate[1][2:]
+        return context
+
+    def _table_entries(self, s):
+        """Associate visible table labels with the same section/row click branch."""
+        cells = [d for d in self.definitions if d.source is s and d.kind == "func"
+                 and any(label == "cellForRowAt" for label, _, _ in d.params)]
+        for cell in cells:
+            selectors = [d for d in self.definitions if d.kind == "func" and d.owner == cell.owner
+                         and any(label == "didSelectRowAt" for label, _, _ in d.params)]
+            parameter = next((name for _, name, typ in cell.params if typ == "IndexPath"), None)
+            if parameter is None:
+                continue
+            for j in _execution_indices(s, cell.begin, cell.end - 2):
+                if s.tokens[j].text != "text" or s.tokens[j + 1].text != "=" or "textLabel" not in s.text(max(cell.begin, j - 5), j):
+                    continue
+                end = _end_expr(s, j + 2, cell.end)
+                question = next((k for k in range(j + 2, end) if s.tokens[k].text == "?"), None)
+                colon = next((k for k in range((question + 1) if question else end, end) if s.tokens[k].text == ":"), None)
+                predicate = _row_predicate(s.text(j + 2, question), parameter) if question is not None else None
+                for label_index in range(j + 2, end):
+                    literal = s.tokens[label_index].literal
+                    kind = self.label_kind(literal) if literal is not None else None
+                    if kind is None:
+                        continue
+                    context = self._table_context(s, label_index, cell, parameter)
+                    if predicate and colon:
+                        context[predicate[0]] = predicate[1] if label_index < colon else ("!=" if predicate[1].startswith("==") else "==") + predicate[1][2:]
+                    elif question is not None:
+                        context["unresolved_row"] = True
+                    results = []
+                    if len(selectors) == 1 and "unresolved_row" not in context:
+                        selected = selectors[0]
+                        ss = selected.source
+                        selected_parameter = next((name for _, name, typ in selected.params if typ == "IndexPath"), None)
+                        if selected_parameter:
+                            for k in _execution_indices(ss, selected.begin, selected.end - 1):
+                                if ss.tokens[k].text not in ("present", "pushViewController", "show", "openURL", "open") or ss.tokens[k + 1].text != "(" or k + 1 not in ss.pairs:
+                                    continue
+                                if self._table_context(ss, k, selected, selected_parameter) != context:
+                                    continue
+                                # Receiver prefixes preserve UIApplication/openURL
+                                # semantics when tracing this associated call only.
+                                start = k
+                                while start > selected.begin and ss.tokens[start - 1].text in (".", "?", "!"):
+                                    start -= 1
+                                    if start > selected.begin and ss.tokens[start - 1].text not in (".", "?", "!"):
+                                        start -= 1
+                                results += self.trace(ss, start, ss.pairs[k + 1] + 1)
+                    self._entry_result(kind, s, label_index, results)
+
+    def _factory_entries(self, s):
+        """Resolve called UIButton factories and the corresponding identifier case.
+
+        The returned button must bind its title, identifier and target action;
+        an invocation must be used in an addSubview/addArrangedSubview call.
+        Neither an unused factory declaration nor an adjacent switch case counts.
+        """
+        factories = [d for d in self.definitions if d.kind == "func" and "->UIButton" in d.source.text(d.start, d.begin)]
+        for factory in factories:
+            fs = factory.source
+            returns = [fs.tokens[k + 1].text for k in range(factory.begin, factory.end - 1) if fs.tokens[k].text == "return"]
+            if len(returns) != 1:
+                continue
+            button = returns[0]
+            title_arg = identifier_arg = action = None
+            for k in range(factory.begin, factory.end - 2):
+                if _simple_receiver(fs, k) != button:
+                    continue
+                if fs.tokens[k].text == "setTitle" and fs.tokens[k + 1].text == "(" and k + 1 in fs.pairs:
+                    args = _args(fs, k + 2, fs.pairs[k + 1])
+                    if args:
+                        title_arg = args[0][1:]
+                elif fs.tokens[k].text == "accessibilityIdentifier" and fs.tokens[k + 1].text == "=":
+                    identifier_arg = (k + 2, _end_expr(fs, k + 2, factory.end))
+                elif fs.tokens[k].text == "addTarget" and fs.tokens[k + 1].text == "(" and k + 1 in fs.pairs:
+                    call = fs.text(k + 2, fs.pairs[k + 1])
+                    match = re.search(r"^self,action:#selector\((?:self\.)?(\w+)", call)
+                    if match:
+                        action = match[1]
+            if not all((title_arg, identifier_arg, action)):
+                continue
+            handlers = [d for d in self.definitions if d.kind == "func" and d.name == action and d.owner == factory.owner]
+            for i in range(len(s.tokens) - 1):
+                if s.tokens[i].text != factory.name or s.tokens[i + 1].text != "(" or i + 1 not in s.pairs or self.owner(s, i) != factory.owner:
+                    continue
+                if s is fs and i == factory.start + 1:
+                    continue
+                visible_use = any(opening < i < close and opening > 0 and s.tokens[opening].text == "(" and s.tokens[opening - 1].text in ("addSubview", "addArrangedSubview") for opening, close in s.pairs.items() if opening < close)
+                if not visible_use:
+                    continue
+                arguments = {label: self.value(s, a, b) for label, a, b in _args(s, i + 2, s.pairs[i + 1])}
+                bound = self._bind(factory, arguments)
+                label = self.value(fs, *title_arg, bound).text
+                kind = self.label_kind(label) if label else None
+                if kind is None:
+                    continue
+                identifier = self.value(fs, *identifier_arg, bound).text
+                results = []
+                if identifier is not None and len(handlers) == 1:
+                    handler = handlers[0]
+                    hs = handler.source
+                    senders = [name for _, name, typ in handler.params if typ == "UIButton"]
+                    if len(senders) == 1:
+                        for expression, cases in _switches(hs, handler.begin, handler.end):
+                            if expression != senders[0] + ".accessibilityIdentifier":
+                                continue
+                            matching = [(begin, end) for a, b, begin, end in cases if self.value(hs, a, b).text == identifier]
+                            if len(matching) == 1:
+                                results += self.trace(hs, *matching[0])
+                self._entry_result(kind, s, i, results)
+
     def _fallback_candidates(self, s):
         """Recognise obvious custom control candidates without claiming routing.
 
@@ -1034,15 +1203,15 @@ class Analyzer:
 
 
 def analyze_legal_links(root: Path, source_texts: Mapping[Path, str], all_texts: Mapping[Path, str], *, scan_incomplete: bool = False) -> list[dict]:
-    """Return per-entry privacy/terms evidence; unsupported bindings stay unknown.
+    """Return per-entry privacy/terms evidence for associated WK loading calls.
 
     Recognises literal/unique Swift constants, enum raw values, direct SwiftUI
     navigation, scoped Link handlers, state-driven sheets, ordinary representable
-    wrappers and basic UIKit target/actions. Explicit Info.plist key lookups and
+    wrappers, UIKit target/actions, matched table sections/rows, and returned
+    UIButton factories with identifier dispatch. Explicit Info.plist lookups and
     .strings/.xcstrings labels are resolved only when unique. Custom controls are
-    retained as unknown candidates. Runtime config decoding, arbitrary
-    computed enum switches, macros and general control-flow analysis are outside
-    the supported proof boundary. all_texts is accepted for a stable integration
-    interface; document prose alone is never a user-interface entry.
+    retained as unknown candidates. Dynamic URL values do not block a found load
+    call. Runtime config decoding, macros and general control-flow analysis are
+    outside this check; document prose alone is never a user-interface entry.
     """
     return Analyzer(root, source_texts, all_texts, scan_incomplete).run()

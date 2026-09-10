@@ -22,15 +22,15 @@
 
 | ID | 检查 | 判定 |
 |---|---|---|
-| LEGAL-001 | 协议打开方式 | 隐私协议和用户协议的所有可识别入口都必须关联到应用内 WKWebView 的 URL 加载；明确外部打开、Safari view controller、本地 HTML/文件或完整扫描缺少必要入口为 FAIL；动态和不完整证据为 NOT_VERIFIABLE。 |
+| LEGAL-001 | 协议打开方式 | 两类协议入口关联的页面或共用封装中存在 WKWebView 加载调用为 PASS；明确外跳或缺少必要入口为 FAIL；候选入口无法关联页面／加载方法或源码不完整为 NOT_VERIFIABLE。 |
 
-固定检查隐私协议与用户协议，不扩展到支持页等其它链接。入口、常量/参数和 WKWebView 封装必须属于同一可解析路径；项目中无关的 WebView、Safari、协议字样、注释或示例字符串不会被借用作证据。自定义 openURL 若实际转给 WKWebView 可通过，默认外跳则失败。每个协议的所有入口都参加汇总，不能只选择一个通过入口。缺少 URL 不发送请求；缺少必要协议与动态无法解析的协议分别处理。
+仅检查协议关联的加载实现，不证明完整控制流、URL 字面量或 WebView 挂载状态。动态 URL 和页面中的普通条件分支不再单独导致需复核。WKWebView 的 load/loadRequest、loadHTMLString、loadFileURL 均可作为加载调用；仅创建实例、注释示例、未调用辅助函数或无关页面不能替代证据。
 
-UIKit 的 `present(nav)` 可继续追踪 `UINavigationController(rootViewController: pane)` 的根页面，实际 URL 来自该页面加载链；只创建但未呈现的容器不能作证。普通协议页面的 push 沿用原有追踪；嵌套导航控制器或直接 push 导航控制器不能据此判为通过。动态根页面保持需复核，包装 Safari 不改变失败结论。`Terms & Support` / `Terms and Support` 属于用户协议入口名称；普通 `Support` 仅在实际呈现页面的协议标题可关联时归入用户协议，无关帮助页不参与。
+入口追踪包括普通按钮、表格的 section/row 与选择事件、按钮工厂的标识与共用事件分发，以及导航控制器包装和跨方法调用。每个入口独立保留证据；明确关联外部浏览器或 Safari 的入口仍失败，不能用其它正常入口掩盖。
 
-仅检查端内 WKWebView 接入，不请求协议 URL、不检测部署或可访问性，不依据 DNS、HTTP 状态、重定向、正文或验证页判定。保留源码 URL/参数及加载链证据；动态路径无法关联时说明静态证据不足。技能 GitHub 自动更新检查独立保留。
+Terms & Support / Terms and Support 作为用户协议标题；普通 Support 需通过页面参数及标题赋值关联到用户协议，不能全局等同于用户协议。标题关联不因同一方法出现无关 if 而整体失效。
 
-PDF 保留 LEGAL-001，移除 LEGAL-002，完整清单共 17 项。JSON/Markdown 不再包含协议请求记录，schema 2.0 不变。测试禁止真实协议请求，验证未部署地址不会影响已有的端内打开证据。
+不请求协议 URL、不检查部署或运行效果；GitHub 自动版本检查独立保留。报告共 17 项，schema 2.0 不变，无 LEGAL-002 或协议网络请求记录。PASS 仅声明存在关联加载实现。
 
 ## 内购
 

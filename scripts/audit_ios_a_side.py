@@ -834,7 +834,7 @@ class Auditor:
             route_details.append({
                 "id": "LEGAL-001", "label": label, "status": route_status,
                 "severity": "high" if route_status == "FAIL" else "info" if route_status == "PASS" else "medium",
-                "expected": "协议入口通过应用内 WKWebView 加载协议 URL",
+                "expected": "协议关联的页面或共用封装存在 WKWebView 加载调用",
                 "actual": entry["actual"], "evidence": evidence,
                 "manual_check": entry.get("manual_check"), "url": entry.get("url"),
             })
