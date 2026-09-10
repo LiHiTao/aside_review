@@ -2,7 +2,7 @@
 
 iOS A 面审核技能
 
-版本：**1.0.8**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
+版本：**1.0.9**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
 
 ## 安装
 
@@ -47,7 +47,7 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
-测试使用模拟 GitHub 响应，协议审计禁止网络请求，不依赖公网，也不会修改已安装技能。开发者更新 `VERSION` 和发布说明后提交，再创建与版本相同的标签（例如 `v1.0.8`）。发布工作流会运行测试、核对标签与 VERSION，并创建带安装 ZIP 的正式 GitHub Release。只有 Release 发布成功后，使用者才会收到更新。
+测试使用模拟 GitHub 响应，协议审计禁止网络请求，不依赖公网，也不会修改已安装技能。开发者更新 `VERSION` 和发布说明后提交，再创建与版本相同的标签（例如 `v1.0.9`）。发布工作流会运行测试、核对标签与 VERSION，并创建带安装 ZIP 的正式 GitHub Release。只有 Release 发布成功后，使用者才会收到更新。
 
 首个发布标签为 `v1.0.0`。不要复用或移动已经发布的版本标签。
 

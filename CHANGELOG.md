@@ -1,5 +1,12 @@
 # 版本更新日志
 
+## 1.0.9
+
+- 修复 SwiftUI NavigationLink / Button 使用自定义 Row(title:) 标签时漏掉协议入口的问题，关联外层 destination/action。
+- 修复 if let 条件绑定吞掉后续页面内容的问题，保留条件体中的关联加载调用。
+- 补充 Swift、Objective-C（.m/.mm）协议入口与 WKWebView 加载回归，保留明确外跳和混合入口失败判定。
+- 添加自定义 Row、跨文件协议页面、本地 HTML 加载的脱敏集成样例；保持 17 项清单、schema 2.0 和无协议网络请求。
+
 ## 1.0.8
 
 - 简化 LEGAL-001：用户协议和隐私协议入口关联的页面／封装存在 WKWebView 加载调用即可通过，不再要求完整控制流、URL 字面量及实例挂载证明。

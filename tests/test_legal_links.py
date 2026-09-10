@@ -68,6 +68,117 @@ class LegalLinksTests(unittest.TestCase):
         self.assertEqual(['https://example.com/privacy', 'https://example.com/terms'], [r['url'] for r in result])
         self.assertTrue(all(not e['path'].startswith('/') for r in result for e in r['evidence']))
 
+    def test_custom_row_title_inside_navigation_label_variants(self):
+        variants = [
+            'NavigationLink(destination: LegalPage(url: config.url)) { MenuRow(icon: "lock", title: "Privacy Policy") }',
+            'NavigationLink { LegalPage(url: config.url) } label: { HStack { MenuRow(title: "Privacy Policy") } }',
+            'NavigationLink(destination: LegalPage(url: config.url), label: { MenuRow(title: "Privacy Policy") })',
+            'NavigationLink(destination: LegalPage(url: config.url)) { if visible { Text("Privacy Policy") } }',
+            'NavigationLink(destination: LegalPage(url: config.url)) { if visible { MenuRow(title: "Privacy Policy") } }',
+            'NavigationLink(destination: LegalPage(url: config.url)) { if let title = config.label { MenuRow(title: "Privacy Policy") } }',
+            'NavigationLink(destination: LegalPage(url: config.url)) { switch mode { case .legal: MenuRow(title: "Privacy Policy"); default: Text("Help") } }',
+            'Button(action: { let web = WKWebView(); web.loadHTMLString(html, baseURL: nil) }) { MenuRow(title: "Privacy Policy") }',
+            'Button { let web = WKWebView(); web.loadHTMLString(html, baseURL: nil) } label: { MenuRow(title: "Privacy Policy") }',
+        ]
+        for source in variants:
+            with self.subTest(source=source):
+                result = self.privacy(source)
+                self.assertEqual('PASS', result['status'])
+                self.assertEqual(1, len([r for r in self.scan(source) if r['kind'] == 'privacy']))
+
+    def test_custom_row_localized_title(self):
+        source = 'NavigationLink(destination: LegalPage(url: config.url)) { MenuRow(title: "legal.privacy") }'
+        self.assertEqual('PASS', self.privacy(source, {'en.lproj/Localizable.strings': '"legal.privacy" = "Privacy Policy";'})['status'])
+
+    def test_custom_row_cannot_lend_title_from_other_scopes(self):
+        variants = [
+            'NavigationLink(destination: LegalPage(title: "Privacy Policy", url: config.url)) { MenuRow(title: "Help") }',
+            'NavigationLink { Text("Privacy Policy"); LegalPage(url: config.url) } label: { MenuRow(title: "Help") }',
+            'NavigationLink(destination: LegalPage(url: config.url)) { MenuRow(title: "Help", action: { Text("Privacy Policy") }) }',
+            'NavigationLink(destination: LegalPage(url: config.url)) { let unused = { MenuRow(title: "Privacy Policy") }; MenuRow(title: "Help") }',
+            'NavigationLink(destination: LegalPage(url: config.url)) { func unused() { MenuRow(title: "Privacy Policy") }; MenuRow(title: "Help") }',
+            'NavigationLink(destination: LegalPage(url: config.url)) { MenuRow(title: "Help") }; MenuRow(title: "Privacy Policy")',
+            'NavigationLink(destination: LegalPage(url: config.url)) { /* MenuRow(title: "Privacy Policy") */ Text("Help") }',
+            'NavigationLink(destination: LegalPage(url: config.url)) { MenuRow(title: "Help", subtitle: "Privacy Policy") }',
+        ]
+        for source in variants:
+            with self.subTest(source=source):
+                result = self.privacy(source)
+                self.assertNotEqual('PASS', result['status'])
+                self.assertTrue(result.get('missing'))
+
+    def test_custom_row_keeps_external_and_unresolved_entries(self):
+        source = '''NavigationLink(destination: LegalPage(url: config.url)) { MenuRow(title: "Privacy Policy") }
+        NavigationLink(destination: SFSafariViewController(url: config.url)) { MenuRow(title: "Privacy Policy") }
+        NavigationLink(destination: UnknownPage()) { MenuRow(title: "Terms of Use") }'''
+        result = self.scan(source)
+        self.assertEqual(['PASS', 'FAIL', 'NOT_VERIFIABLE'], [r['status'] for r in result])
+
+    def test_objc_sender_selectors_crossfile_helper_and_local_file(self):
+        sources = {'Settings.m': '''
+        @interface Settings : UIViewController
+        @end
+        @implementation Settings
+        - (void)setup {
+          [privacy setTitle:@"Privacy Policy" forState:UIControlStateNormal];
+          [privacy addTarget:self action:@selector(openPrivacy:) forControlEvents:UIControlEventTouchUpInside];
+          [terms setTitle:@"Terms of Use" forState:UIControlStateNormal];
+          [terms addTarget:self action:@selector(openTerms:) forControlEvents:UIControlEventTouchUpInside];
+        }
+        - (void)openPrivacy:(UIButton *)sender {
+          DocumentPane *page = [[DocumentPane alloc] init];
+          UINavigationController *nav = [[UINavigationController alloc] initWithRootViewController:page];
+          [self presentViewController:nav animated:YES completion:nil];
+        }
+        - (void)openTerms:(id)sender {
+          DocumentPane *page = [[DocumentPane alloc] init];
+          [self.navigationController pushViewController:page animated:YES];
+        }
+        @end
+        ''', 'DocumentPane.m': '''
+        @interface DocumentPane : UIViewController
+        @end
+        @implementation DocumentPane
+        - (void)viewDidLoad { [self reloadDocument:nil]; }
+        - (void)reloadDocument:(id)sender {
+          WKWebView *web = [[WKWebView alloc] initWithFrame:CGRectZero];
+          [web loadFileURL:fileURL allowingReadAccessToURL:directoryURL];
+        }
+        @end
+        '''}
+        result = self.scan('', sources)
+        self.assertEqual(['PASS', 'PASS'], [r['status'] for r in result])
+        for name, replacement in [('Settings.m', '@selector(unbound:)'), ('DocumentPane.m', '[self unrelated:nil]')]:
+            broken = dict(sources)
+            broken[name] = broken[name].replace('@selector(openPrivacy:)' if name == 'Settings.m' else '[self reloadDocument:nil]', replacement)
+            self.assertEqual('NOT_VERIFIABLE', self.privacy('', broken)['status'])
+
+    def test_objc_mm_html_helper_external_and_unused_loading(self):
+        source = '''
+        @interface Settings : UIViewController
+        @end
+        @implementation Settings
+        - (void)setup {
+          [privacy setTitle:@"Privacy Policy" forState:UIControlStateNormal];
+          [privacy addTarget:self action:@selector(openPrivacy:) forControlEvents:UIControlEventTouchUpInside];
+        }
+        - (void)openPrivacy:(id)sender { [self showDocument:sender]; }
+        - (void)showDocument:(id)sender {
+          WKWebView *web = [[WKWebView alloc] init];
+          [web loadHTMLString:html baseURL:nil];
+        }
+        @end
+        '''
+        self.assertEqual('PASS', self.privacy('', {'Settings.mm': source})['status'])
+        external = source.replace('[self showDocument:sender]', '[[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil]')
+        self.assertEqual('FAIL', self.privacy('', {'Settings.mm': external})['status'])
+        unused = source.replace('[self showDocument:sender]', 'NSLog(@"show document")')
+        self.assertEqual('NOT_VERIFIABLE', self.privacy('', {'Settings.mm': unused})['status'])
+        comment = source.replace('[web loadHTMLString:html baseURL:nil];', '/* [web loadHTMLString:html baseURL:nil]; */')
+        self.assertEqual('NOT_VERIFIABLE', self.privacy('', {'Settings.mm': comment})['status'])
+        wrong_selector = source.replace('@selector(openPrivacy:)', '@selector(openPrivacy:other:)')
+        self.assertEqual('NOT_VERIFIABLE', self.privacy('', {'Settings.mm': wrong_selector})['status'])
+
     def test_inline_make_view_load(self):
         wrapper = '''struct LegalPage: UIViewRepresentable {
           let url: URL

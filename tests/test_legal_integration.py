@@ -17,6 +17,61 @@ class LegalIntegrationTests(unittest.TestCase):
     def setUp(self):
         assert_no_audit_network(self)
 
+    def test_custom_navigation_labels_and_local_html_are_associated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Profile.swift").write_text('''import SwiftUI
+struct Profile: View {
+    var body: some View {
+        VStack {
+            NavigationLink(destination: DocumentPage(document: .privacy)) {
+                MenuRow(icon: "hand.raised", title: "Privacy Policy", subtitle: "Data handling")
+            }
+            NavigationLink(destination: DocumentPage(document: .terms)) {
+                MenuRow(icon: "doc.text", title: "Terms of Use", subtitle: "Usage agreement")
+            }
+        }
+    }
+}
+struct MenuRow: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    var body: some View { HStack { Image(systemName: icon); Text(title) } }
+}
+''')
+            (root / "Document.swift").write_text('''import SwiftUI
+import WebKit
+enum Document { case privacy, terms
+    var fileURL: URL? { Bundle.main.url(forResource: "document", withExtension: "html") }
+}
+struct DocumentPage: View {
+    let document: Document
+    var body: some View {
+        Group {
+            if let url = document.fileURL { LocalPage(fileURL: url) }
+            else { Text("Document unavailable") }
+        }
+    }
+}
+struct LocalPage: UIViewRepresentable {
+    let fileURL: URL
+    func makeUIView(context: Context) -> WKWebView { WKWebView() }
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        webView.loadFileURL(fileURL, allowingReadAccessTo: fileURL.deletingLastPathComponent())
+    }
+}
+''')
+            before = {p.name: p.read_bytes() for p in root.iterdir()}
+            report = Auditor(root).run().report()
+            finding = next(f for f in report["findings"] if f["id"] == "LEGAL-001")
+            self.assertEqual(finding["status"], "PASS", finding)
+            self.assertEqual(len(finding["details"]), 2, finding)
+            self.assertTrue(all(d["evidence"][0]["path"] == "Profile.swift" for d in finding["details"]))
+            self.assertEqual(len(report["findings"]), 17)
+            self.assertEqual(report["schema_version"], "2.0")
+            self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
+
     def test_six_associated_entries_across_three_uikit_forms(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

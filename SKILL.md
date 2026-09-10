@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.0.8`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.0.9`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -99,9 +99,10 @@ IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或�
 
 固定检查隐私协议（Privacy Policy）和用户协议（Terms of Service / Terms of Use / User Agreement）。通过标准仅为：两类协议的入口关联页面或共用封装中存在 WKWebView 加载调用。
 
-- 按“入口 → 事件处理 → 页面／共用封装 → 加载方法”做轻量源码关联，支持 SwiftUI、UIKit、导航控制器包装及跨方法调用。仅导入 WebKit、创建 WKWebView、出现协议字样或无关页面中的 WebView 不足以通过；注释、说明字符串和未调用的辅助函数不作为加载实现证据。
+- 按“入口 → 事件处理 → 页面／共用封装 → 加载方法”做轻量源码关联，支持 Swift / SwiftUI、UIKit、Objective-C（含 `.m` / `.mm`）、导航控制器包装及跨方法调用。仅导入 WebKit、创建 WKWebView、出现协议字样或无关页面中的 WebView 不足以通过；注释、说明字符串和未调用的辅助函数不作为加载实现证据。
 - 关联到 WKWebView 的 `load` / `loadRequest` / `loadHTMLString` / `loadFileURL` 调用均属于加载实现。URL 为动态参数不影响通过；不再要求 URL 字面量解析、完整控制流证明、所有分支覆盖或 WebView 实例挂载证明。条件、Close 按钮、布局和进度提示不因其存在而降级。
 - 明确关联到外部浏览器或 `SFSafariViewController` 的协议入口仍为 `FAIL`；多个入口分别记录，正常 WKWebView 入口不能掩盖其它外跳入口。SwiftUI Link/openURL 按关联处理链判断，不仅凭关键词。
+- SwiftUI NavigationLink / Button 的 label 闭包支持自定义组件的 `title` 参数（例如 `MenuRow(title: "Privacy Policy")`），组件无需自带 action；入口仍关联外层导航或按钮的 destination/action，不借用相邻组件或目标页面中的标题。
 - 支持普通按钮、UITableView 行选择，以及按钮工厂生成控件并通过标识分发的共用事件。标题、section/row、控件标识及事件需对应，不借用其它行或其它控件的加载调用。
 - `Terms & Support` / `Terms and Support` 为用户协议名称。普通 Support 可通过传入页面的标题参数和页面标题赋值关联到用户协议；不因同一方法中存在无关条件而丢弃该证据，普通帮助页仍不作为协议证据。
 - 确认缺少必要协议入口为 `FAIL`；发现协议候选但无法关联页面或加载调用、源码读取不完整时为 `NOT_VERIFIABLE`，报告具体缺失的关联证据。

@@ -124,3 +124,7 @@ META-003 必须复用 IAP-003 的状态和静态证据，避免同一商品提�
 - Markdown 输出四态汇总、完整清单、逐项证据、聚合子检查和人工复核。A4 PDF 只输出报告标题和完整检查清单，不输出项目标识、规则版本、统计卡、状态说明、详细检查、子检查、期望、证据或人工复核区块。
 - 默认仅生成 PDF；其它格式只在用户明确要求时使用。`--format pdf` 只生成 `ios-aside-review.pdf`；`--format all` 同时生成 Markdown、JSON 和 PDF；`--format both` 保留 Markdown + JSON。
 - PDF 缺少 ReportLab 或可嵌入中文字体时必须在写报告前失败，不留下损坏文件。
+
+### 1.0.9 入口兼容
+
+SwiftUI 导航和按钮的 label 闭包可从自定义 Row 的 title 参数识别协议名称，action/destination 由外层控件提供。保留 Swift UIKit 与 Objective-C（.m/.mm）的事件、页面及 WKWebView 加载关联，不因自定义 Row 自身没有 action 而漏掉外层入口。相邻标题、注释和无关 WebView 不作为关联证据。

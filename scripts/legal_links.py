@@ -407,13 +407,20 @@ class Analyzer:
                         j += 1
                     if j < len(s.tokens) and s.tokens[j].text == "=":
                         self.constants.append((s, s.tokens[i + 1].text, owner, i, j + 1, _end_expr(s, j + 1, len(s.tokens))))
-            # Basic no-argument Objective-C action methods.
+            # Preserve the complete Objective-C selector, including sender arguments.
             for i in range(len(s.tokens) - 5):
-                if s.tokens[i].text in ("-", "+") and s.tokens[i + 1].text == "(" and i + 1 in s.pairs:
-                    close = s.pairs[i + 1]
-                    if close + 2 < len(s.tokens) and s.tokens[close + 2].text == "{" and close + 2 in s.pairs:
-                        self.definitions.append(Definition(s, s.tokens[close + 1].text, i,
-                            close + 3, s.pairs[close + 2], owner=next((d.name for d in reversed(types) if d.begin <= i < d.end), None)))
+                if s.tokens[i].text not in ("-", "+") or s.tokens[i + 1].text != "(" or i + 1 not in s.pairs:
+                    continue
+                close = s.pairs[i + 1]
+                j = close + 2
+                while j < len(s.tokens) and s.tokens[j].text not in ("{", ";", "}"):
+                    j += 1
+                if j not in s.pairs or s.tokens[j].text != "{":
+                    continue
+                labels = [s.tokens[k].text for k in range(close + 1, j - 1) if s.tokens[k + 1].text == ":"]
+                selector = "".join(label + ":" for label in labels) if labels else s.tokens[close + 1].text
+                self.definitions.append(Definition(s, selector, i, j + 1, s.pairs[j],
+                    owner=next((d.name for d in reversed(types) if d.begin <= i < d.end), None)))
 
     def owner(self, s, index):
         types = [d for d in self.definitions if d.kind == "type" and d.source is s and d.begin <= index < d.end]
@@ -718,6 +725,9 @@ class Analyzer:
                     equals = candidate
             if equals < b and s.tokens[equals].text == "=" and (equals + 1 >= b or s.tokens[equals + 1].text != "="):
                 end = _end_expr(s, equals + 1, b)
+                # Optional bindings in `if let` must not consume their body as
+                # part of the value expression; its child view is associated.
+                end = min([end] + [opening for opening in control_bodies if equals < opening < end])
                 val = self.value(s, equals + 1, end, env)
                 if name == "viewControllers":
                     container = env.get(_simple_receiver(s, i) or "", Value())
@@ -752,7 +762,7 @@ class Analyzer:
                         if "UIApplication" in receiver_code:
                             results.append(self.outcome("FAIL", "协议通过 UIApplication 在应用外打开。", args.get(selector, Value()).text, [self.evidence(s, i)]))
                     elif receiver_name == "self":
-                        methods = [d for d in self.definitions if d.kind == "func" and d.name == selector and d.owner == self.owner(s, i)]
+                        methods = [d for d in self.definitions if d.kind == "func" and d.name == ("".join(label + ":" for label, _, _ in arguments) if arguments else selector) and d.owner == self.owner(s, i)]
                         if len(methods) == 1:
                             d = methods[0]
                             key = (d.source.path, d.start)
@@ -812,9 +822,10 @@ class Analyzer:
                     else:
                         results += self.destination(target, s, i, seen)
                 elif token.text == "SFSafariViewController":
-                    # Construction only becomes a violation when presented; an
-                    # unrelated unused Safari variable does not affect the flow.
-                    pass
+                    # Declarative destinations associate the construction;
+                    # ordinary unused Safari variables are still not evidence.
+                    if destination:
+                        results += self.destination(Value(type_name=token.text, args=args), s, i, seen)
                 elif destination and token.text[:1].isupper() and token.text not in ("URL", "URLRequest", "WKWebView"):
                     # Inside a SwiftUI destination, child view construction is
                     # itself its declarative presentation.
@@ -869,6 +880,45 @@ class Analyzer:
         result.pop("_containers", None)
         self.entries.append({"kind": kind, **result})
 
+    def _label_titles(self, s, a, b):
+        """Read visible-title arguments only inside the entry's label builder.
+
+        Constructor arguments are not searched recursively: a destination,
+        callback, tooltip or neighbouring declaration cannot name this entry.
+        """
+        containers = {"VStack", "HStack", "ZStack", "Group", "ScrollView"}
+        controls = _control_bodies(s, a, b)
+        i = a
+        while i < b:
+            token = s.tokens[i].text
+            if token in ("func", "let", "var"):
+                end = _end_expr(s, i + 1, b)
+                if token in ("let", "var"):
+                    end = min([end] + [opening for opening in controls if i < opening < end])
+                i = max(i + 1, end)
+                continue
+            if i + 1 < b and s.tokens[i + 1].text == "(" and i + 1 in s.pairs:
+                close = s.pairs[i + 1]
+                if token[:1].isupper() and token not in ("Button", "NavigationLink", "Link"):
+                    for label, x, y in _args(s, i + 2, close):
+                        if label == "title" or (token in ("Text", "Label") and label == "_"):
+                            yield x, y
+                i = close + 1
+                if token in containers and i < b and s.tokens[i].text == "{" and i in s.pairs:
+                    yield from self._label_titles(s, i + 1, s.pairs[i])
+                    i = s.pairs[i] + 1
+                continue
+            if token in containers and i + 1 < b and s.tokens[i + 1].text == "{" and i + 1 in s.pairs:
+                yield from self._label_titles(s, i + 2, s.pairs[i + 1])
+                i = s.pairs[i + 1] + 1
+                continue
+            if token in ("{", "[") and i in s.pairs:
+                if i in controls:
+                    yield from self._label_titles(s, i + 1, s.pairs[i])
+                i = s.pairs[i] + 1
+                continue
+            i += 1
+
     def run(self):
         for s in self.sources:
             for i, token in enumerate(s.tokens):
@@ -895,13 +945,16 @@ class Analyzer:
                     labels = [c for c in closures if c[0] == "label"]
                     if not labels and any(label in ("action", "destination") for label, _, _ in args):
                         labels = closures
+                    labels += [("label", a + 1, b - 1) for label, a, b in args
+                               if label == "label" and s.tokens[a].text == "{" and s.pairs.get(a) == b - 1]
                     for _, a, b in labels:
-                        for j in range(a, b):
-                            if s.tokens[j].literal is not None and j >= 2 and s.tokens[j - 2].text in ("Text", "Label"):
-                                kind = self.label_kind(s.tokens[j].literal)
-                                support |= s.tokens[j].literal.strip().lower() == "support"
-                                if kind:
-                                    break
+                        for x, y in self._label_titles(s, a, b):
+                            kind = self.expression_kind(s, x, y)
+                            support |= (self.value(s, x, y).text or "").strip().lower() == "support"
+                            if kind:
+                                break
+                        if kind:
+                            break
                 if kind is None and not support:
                     continue
                 results, fallback_url = [], None
@@ -1004,7 +1057,7 @@ class Analyzer:
                 if target and target[0] == "addTarget" and s.text(*target[1]) == receiver:
                     for label, a, b in target[2]:
                         if label == "action":
-                            match = re.fullmatch(r"@selector\((\w+)\)", s.text(a, b))
+                            match = re.fullmatch(r"@selector\((\w+(?::\w+)*:?)\)", s.text(a, b))
                             if match:
                                 actions += [d for d in self.definitions if d.kind == "func" and d.name == match[1] and d.owner == owner]
             results = []
