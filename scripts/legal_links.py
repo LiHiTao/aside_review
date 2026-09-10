@@ -125,7 +125,7 @@ def _kind(label):
     label = re.sub(r"[_\-]+", " ", label).strip().lower()
     if re.fullmatch(r"(?:privacy(?: policy| agreement| notice)?|隐私(?:政策|协议|条款)|隱私(?:政策|協議|條款))", label):
         return "privacy"
-    if re.fullmatch(r"(?:terms(?: of (?:service|use))?|user agreement|user terms|terms (?:and|&) conditions|eula|用户(?:协议|条款)|使用(?:协议|条款)|用戶(?:協議|條款))", label):
+    if re.fullmatch(r"(?:terms(?: of (?:service|use))?|user agreement|user terms|terms (?:and|&) (?:conditions|support)|eula|用户(?:协议|条款)|使用(?:协议|条款)|用戶(?:協議|條款))", label):
         return "terms"
     return None
 
@@ -191,6 +191,20 @@ def _end_expr(source, begin, limit):
             i = source.pairs[i]
         i += 1
     return i
+
+
+def _simple_receiver(source, index):
+    """Read a local/self property receiver, including optional/forced chains."""
+    if index < 2 or source.tokens[index - 1].text != ".":
+        return None
+    j = index - 2
+    while j >= 0 and source.tokens[j].text in ("?", "!"):
+        j -= 1
+    if j < 0 or not re.fullmatch(r"[A-Za-z_]\w*", source.tokens[j].text):
+        return None
+    if j >= 2 and source.tokens[j - 1].text == "." and source.tokens[j - 2].text != "self":
+        return None
+    return source.tokens[j].text
 
 
 class Analyzer:
@@ -396,6 +410,8 @@ class Analyzer:
                         return Value(type_name=allocated.type_name, args={"url": args.get(selector, Value())})
                     if selector in ("init", "initWithFrame"):
                         return allocated
+                    if selector == "initWithRootViewController":
+                        return Value(type_name=allocated.type_name, args={"rootViewController": args.get(selector, Value())})
         name = s.text(a, b)
         for prefix in ("self.", "$", "&"):
             if name.startswith(prefix):
@@ -465,6 +481,16 @@ class Analyzer:
         return env
 
     def destination(self, value, s, index, seen):
+        if value.type_name in ("UINavigationController", "UIKit.UINavigationController"):
+            root = value.args.get("rootViewController", Value())
+            if root.type_name is None:
+                return [self.outcome("NOT_VERIFIABLE", "已关联 UINavigationController 展示，但 rootViewController 为空、动态生成或无法解析。", evidence=[self.evidence(s, index)])]
+            if root.type_name in ("UINavigationController", "UIKit.UINavigationController"):
+                return [self.outcome("NOT_VERIFIABLE", "发现嵌套 UINavigationController，当前静态模式不确认其实际展示的根页面。", evidence=[self.evidence(s, index)])]
+            results = self.destination(root, s, index, seen)
+            for result in results:
+                result.setdefault("_containers", []).append(value)
+            return results or [self.outcome("NOT_VERIFIABLE", "已关联 UINavigationController 的根页面，但根页面的协议加载链无法解析。", evidence=[self.evidence(s, index)])]
         if value.type_name in ("SFSafariViewController", "SafariView", "SafariViewController"):
             return [self.outcome("FAIL", "协议通过 Safari 页面打开，未使用 WKWebView。", value.args.get("url", Value()).text, [self.evidence(s, index)])]
         definitions = [d for d in self.definitions if d.kind == "type" and d.name == value.type_name]
@@ -479,6 +505,8 @@ class Analyzer:
             return []
         seen = seen | {key}
         properties = dict(value.args)
+        constructor = None
+        arguments = {}
         initializers = [f for f in self.definitions if f.kind == "func" and f.source is d.source and f.owner == d.name and f.name == "init"]
         if initializers:
             matching = [f for f in initializers if set(value.args) <= {label for label, _, _ in f.params}]
@@ -536,7 +564,58 @@ class Analyzer:
                     if brace in d.source.pairs:
                         results += self.trace(d.source, brace + 1, d.source.pairs[brace], properties, seen,
                                               expected=expected, destination=True)
+        displayed_kind = self._displayed_protocol(properties, methods, constructor, arguments)
+        if displayed_kind:
+            if not results:
+                results = [self.outcome("NOT_VERIFIABLE", "已关联协议页面的实际标题，但该页面的 WKWebView 加载链无法解析。", evidence=[self.evidence(s, index)])]
+            for result in results:
+                result["_protocol_kind"] = displayed_kind
         return results
+
+    def _displayed_protocol(self, properties, methods, constructor=None, constructor_arguments=None):
+        """Bind a generic Support entry only to a real destination's UI title.
+
+        A heading argument that is merely passed or stored is insufficient. The
+        bounded proof accepts an unambiguous title/navigationItem.title assignment
+        in the presented controller's initializer or lifecycle method.
+        """
+        title = None
+        navigation_title = None
+        navigation_title_assigned = False
+        ordered = ([constructor] if constructor else []) + sorted(methods, key=lambda method: method.name != "loadView")
+        for method in ordered:
+            if method.name not in ("init", "viewDidLoad", "loadView"):
+                continue
+            s = method.source
+            if any(s.tokens[i].text in ("if", "switch", "guard", "while", "for") for i in range(method.begin, method.end)):
+                return None
+            env = dict(constructor_arguments or {}) if method is constructor else dict(properties)
+            local_names = {name for _, name, _ in method.params}
+            i = method.begin
+            while i < method.end - 1:
+                if s.tokens[i].text == "{" and i in s.pairs:
+                    i = s.pairs[i] + 1
+                    continue
+                if s.tokens[i].text in ("let", "var"):
+                    local_names.add(s.tokens[i + 1].text)
+                if s.tokens[i + 1].text == "=":
+                    end = _end_expr(s, i + 2, method.end)
+                    val = self.value(s, i + 2, end, env)
+                    start = i
+                    while start >= method.begin + 2 and s.tokens[start - 1].text == ".":
+                        start -= 2
+                    lhs = s.text(start, i + 1)
+                    if lhs in ("self.title", "title") and not (lhs == "title" and "title" in local_names):
+                        title = val
+                    elif lhs in ("navigationItem.title", "self.navigationItem.title") and not (lhs.startswith("navigationItem") and "navigationItem" in local_names):
+                        navigation_title = val
+                        navigation_title_assigned = True
+                    env[s.tokens[i].text] = val
+                    i = end
+                    continue
+                i += 1
+        displayed = navigation_title if navigation_title_assigned else title
+        return self.label_kind(displayed.text) if displayed and displayed.text else None
 
     def _modifiers(self, s, index):
         seen = set()
@@ -605,11 +684,25 @@ class Analyzer:
             token = s.tokens[i]
             if token.text in ("if", "guard", "switch", "for", "while", "catch"):
                 results.append(self.outcome("NOT_VERIFIABLE", "协议处理链包含条件、循环或异常分支，当前静态模式不能确认所有实际打开路径。", evidence=[self.evidence(s, i)]))
-            if i + 1 < b and s.tokens[i + 1].text == "=" and (i + 2 >= b or s.tokens[i + 2].text != "="):
-                name = token.text
-                end = _end_expr(s, i + 2, b)
-                env[name] = self.value(s, i + 2, end, env)
-                if s.text(i + 2, end) == "true":
+            name = token.text
+            equals = i + 1
+            if token.text in ("let", "var") and i + 2 < b:
+                candidate = i + 2
+                while candidate < b and s.tokens[candidate].text not in ("=", "{", "}", ";"):
+                    if candidate > i + 2 and "\n" in s.raw[s.tokens[candidate - 1].start:s.tokens[candidate].start]:
+                        break
+                    candidate += 1
+                if candidate < b and s.tokens[candidate].text == "=":
+                    name = s.tokens[i + 1].text
+                    equals = candidate
+            if equals < b and s.tokens[equals].text == "=" and (equals + 1 >= b or s.tokens[equals + 1].text != "="):
+                if name == "viewControllers" and i >= a + 2 and s.tokens[i - 1].text == ".":
+                    container = env.get(_simple_receiver(s, i) or "", Value())
+                    if container.type_name in ("UINavigationController", "UIKit.UINavigationController"):
+                        container.args.clear()
+                end = _end_expr(s, equals + 1, b)
+                env[name] = self.value(s, equals + 1, end, env)
+                if s.text(equals + 1, end) == "true":
                     env[name] = Value(text="true")
                 if name in assignments and name in mounted:
                     results.append(self.outcome("NOT_VERIFIABLE", "同一 WebView 引用被多次赋值，无法确认已展示实例与加载实例相同。", evidence=[self.evidence(s, i)]))
@@ -624,12 +717,20 @@ class Analyzer:
                     receiver_name = s.text(*receiver_span).removeprefix("self.")
                     args = {label: self.value(s, x, y, env) for label, x, y in arguments}
                     receiver_value = env.get(receiver_name, Value())
+                    if selector in ("setViewControllers", "pushViewController", "popViewControllerAnimated", "popToRootViewControllerAnimated", "popToViewController") and receiver_value.type_name in ("UINavigationController", "UIKit.UINavigationController"):
+                        receiver_value.args.clear()
+                        i = close + 1
+                        continue
                     if selector == "loadRequest" and receiver_value.type_name == "WKWebView" and receiver_name in mounted:
                         results.append(self.loaded(args.get("loadRequest", Value()), s, i, expected))
                     elif selector in ("loadHTMLString", "loadFileURL") and receiver_value.type_name == "WKWebView" and receiver_name in mounted:
                         results.append(self.outcome("FAIL", "协议通过 WKWebView 加载本地 HTML 或文件。", "", [self.evidence(s, i)]))
                     elif selector in ("presentViewController", "pushViewController"):
-                        results += self.destination(args.get(selector, Value()), s, i, seen)
+                        target = args.get(selector, Value())
+                        if selector == "pushViewController" and target.type_name in ("UINavigationController", "UIKit.UINavigationController"):
+                            results.append(self.outcome("NOT_VERIFIABLE", "协议入口尝试 push 导航控制器本身，不能按 present 的根页面展示链判定通过。", evidence=[self.evidence(s, i)]))
+                        else:
+                            results += self.destination(target, s, i, seen)
                     elif selector in ("openURL", "open"):
                         receiver_code = s.text(*receiver_span)
                         if "UIApplication" in receiver_code:
@@ -661,7 +762,12 @@ class Analyzer:
             if i + 1 < b and s.tokens[i + 1].text == "(" and i + 1 in s.pairs:
                 close = s.pairs[i + 1]
                 args = {label: self.value(s, x, y, env) for label, x, y in _args(s, i + 2, close)}
-                receiver = s.tokens[i - 2].text if i >= 2 and s.tokens[i - 1].text == "." else None
+                receiver = _simple_receiver(s, i)
+                container = env.get(receiver or "", Value())
+                if token.text in ("setViewControllers", "pushViewController", "popViewController", "popToRootViewController", "popToViewController") and container.type_name in ("UINavigationController", "UIKit.UINavigationController"):
+                    container.args.clear()
+                    i = close + 1
+                    continue
                 if token.text in ("loadHTMLString", "loadFileURL"):
                     receiver_value = env.get(receiver or "", Value())
                     if receiver_value.type_name == "WKWebView":
@@ -685,7 +791,10 @@ class Analyzer:
                             results.append(self.outcome("FAIL", "协议使用系统 openURL/UIApplication 外部打开方式。", value.text, [self.evidence(s, i)]))
                 elif token.text in ("present", "pushViewController", "show"):
                     target = args.get("_", args.get("viewController", Value()))
-                    results += self.destination(target, s, i, seen)
+                    if token.text == "pushViewController" and target.type_name in ("UINavigationController", "UIKit.UINavigationController"):
+                        results.append(self.outcome("NOT_VERIFIABLE", "协议入口尝试 push 导航控制器本身，不能按 present 的根页面展示链判定通过。", evidence=[self.evidence(s, i)]))
+                    else:
+                        results += self.destination(target, s, i, seen)
                 elif token.text == "SFSafariViewController":
                     # Construction only becomes a violation when presented; an
                     # unrelated unused Safari variable does not affect the flow.
@@ -725,6 +834,11 @@ class Analyzer:
     def _entry_result(self, kind, s, index, results, fallback_url=None):
         self.entry_locations.add((s.path, index))
         evidence = [self.evidence(s, index)]
+        for result in results:
+            if result["status"] == "PASS" and any("rootViewController" not in container.args for container in result.get("_containers", [])):
+                result.update(status="NOT_VERIFIABLE", url=None,
+                              actual="已展示的导航控制器页面栈发生变更，不能沿用初始化时的协议根页面。",
+                              manual_check="核对导航控制器实际展示的页面栈及对应协议 URL。")
         if not results:
             result = self.outcome("NOT_VERIFIABLE", "已发现协议操作入口，但当前支持的静态模式无法关联完整的页面、参数与 WKWebView 加载链。", fallback_url, evidence)
         else:
@@ -737,6 +851,8 @@ class Analyzer:
         if self.incomplete and result["status"] == "PASS":
             result.update(status="NOT_VERIFIABLE", actual="源码读取或词法结构不完整，不能确认协议加载链完整。",
                           manual_check="补齐源码或修复读取问题后重新检查协议入口。")
+        result.pop("_protocol_kind", None)
+        result.pop("_containers", None)
         self.entries.append({"kind": kind, **result})
 
     def run(self):
@@ -754,10 +870,11 @@ class Analyzer:
                     end = s.pairs[end] + 1
                 if end + 2 < len(s.tokens) and s.tokens[end].text == "label" and s.tokens[end + 1].text == ":" and s.tokens[end + 2].text == "{" and end + 2 in s.pairs:
                     closures.append(("label", end + 3, s.pairs[end + 2]))
-                kind = None
+                kind, support = None, False
                 for label, a, b in args:
                     if label in ("_", "title"):
                         kind = self.expression_kind(s, a, b)
+                        support |= (self.value(s, a, b).text or "").strip().lower() == "support"
                         if kind:
                             break
                 if kind is None:
@@ -768,9 +885,10 @@ class Analyzer:
                         for j in range(a, b):
                             if s.tokens[j].literal is not None and j >= 2 and s.tokens[j - 2].text in ("Text", "Label"):
                                 kind = self.label_kind(s.tokens[j].literal)
+                                support |= s.tokens[j].literal.strip().lower() == "support"
                                 if kind:
                                     break
-                if kind is None:
+                if kind is None and not support:
                     continue
                 results, fallback_url = [], None
                 if token.text == "Link":
@@ -798,6 +916,11 @@ class Analyzer:
                             if len(methods) == 1:
                                 d = methods[0]
                                 results += self.trace(d.source, d.begin, d.end)
+                if kind is None:
+                    inferred = {r.get("_protocol_kind") for r in results if r.get("_protocol_kind")}
+                    if inferred != {"terms"}:
+                        continue
+                    kind = "terms"
                 self._entry_result(kind, s, i, results, fallback_url)
             self._uikit(s)
             self._fallback_candidates(s)
@@ -817,7 +940,8 @@ class Analyzer:
                 continue
             title = self.value(s, args[0][1], args[0][2]).text
             kind = self.label_kind(title) if title else None
-            if not kind:
+            support = (title or "").strip().lower() == "support"
+            if not kind and not support:
                 continue
             receiver = s.tokens[i - 2].text
             owner = self.owner(s, i)
@@ -835,6 +959,11 @@ class Analyzer:
             if len(methods) == 1:
                 d = methods[0]
                 results = self.trace(d.source, d.begin, d.end)
+            if kind is None:
+                inferred = {r.get("_protocol_kind") for r in results if r.get("_protocol_kind")}
+                if inferred != {"terms"}:
+                    continue
+                kind = "terms"
             self._entry_result(kind, s, i, results)
         for i, token in enumerate(s.tokens):
             if token.text != "[" or i not in s.pairs:
@@ -844,7 +973,8 @@ class Analyzer:
                 continue
             title = self.value(s, call[2][0][1], call[2][0][2]).text
             kind = self.label_kind(title) if title else None
-            if not kind:
+            support = (title or "").strip().lower() == "support"
+            if not kind and not support:
                 continue
             receiver = s.text(*call[1])
             owner = self.owner(s, i)
@@ -863,6 +993,11 @@ class Analyzer:
             if len(actions) == 1:
                 d = actions[0]
                 results = self.trace(d.source, d.begin, d.end)
+            if kind is None:
+                inferred = {r.get("_protocol_kind") for r in results if r.get("_protocol_kind")}
+                if inferred != {"terms"}:
+                    continue
+                kind = "terms"
             self._entry_result(kind, s, i, results)
 
     def _fallback_candidates(self, s):

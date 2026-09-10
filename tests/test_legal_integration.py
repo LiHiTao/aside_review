@@ -12,6 +12,60 @@ except ImportError:
 
 
 class LegalIntegrationTests(unittest.TestCase):
+    def test_navigation_wrapped_protocols_reach_network_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Gate.swift").write_text('''import UIKit
+class Gate: UIViewController {
+    func setup() {
+        privacyButton.setTitle("Privacy Policy", for: .normal)
+        privacyButton.addTarget(self, action: #selector(showPrivacy), for: .touchUpInside)
+        termsButton.setTitle("Terms & Support", for: .normal)
+        termsButton.addTarget(self, action: #selector(showTerms), for: .touchUpInside)
+    }
+    @objc private func showPrivacy() {
+        let pane = LegalPane(url: Legal.privacyURL, heading: "Privacy Policy")
+        let nav = UINavigationController(rootViewController: pane)
+        nav.modalPresentationStyle = .fullScreen
+        present(nav, animated: true)
+    }
+    @objc private func showTerms() {
+        let pane = LegalPane(url: Legal.termsURL, heading: "Terms & Support")
+        present(UINavigationController(rootViewController: pane), animated: true)
+    }
+}
+''')
+            (root / "Legal.swift").write_text('''import UIKit
+import WebKit
+enum Legal {
+    static let privacyURL = URL(string: "https://example.com/privacy")!
+    static let termsURL = URL(string: "https://example.com/terms")!
+}
+class LegalPane: UIViewController {
+    let url: URL
+    init(url: URL, heading: String) {
+        self.url = url
+        super.init(nibName: nil, bundle: nil)
+        title = heading
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) unavailable") }
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        let web = WKWebView()
+        view.addSubview(web)
+        web.load(URLRequest(url: url))
+    }
+}
+''')
+            before = {p.name: p.read_bytes() for p in root.iterdir()}
+            probe = Mock(side_effect=successful_probe)
+            findings = {f["id"]: f for f in Auditor(root, legal_url_probe=probe).run().report()["findings"]}
+            self.assertEqual(findings["LEGAL-001"]["status"], "PASS", findings["LEGAL-001"])
+            self.assertEqual(findings["LEGAL-002"]["status"], "PASS", findings["LEGAL-002"])
+            self.assertEqual({call.args[0] for call in probe.call_args_list}, {"https://example.com/privacy", "https://example.com/terms"})
+            self.assertEqual(probe.call_count, 2)
+            self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
+
     def test_routes_network_metadata_schema_and_read_only(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

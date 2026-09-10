@@ -19,6 +19,30 @@ struct LegalPage: UIViewRepresentable {
 }
 '''
 
+LEGAL_PANE = '''
+import UIKit
+import WebKit
+final class SauceWashLegalPane: UIViewController {
+    private let url: URL
+    private let heading: String
+    init(url: URL, heading: String) {
+        self.url = url
+        self.heading = heading
+        super.init(nibName: nil, bundle: nil)
+    }
+    func viewDidLoad() {
+        title = heading
+        let web = WKWebView()
+        view.addSubview(web)
+        web.load(URLRequest(url: url))
+    }
+}
+enum SauceWashLegal {
+    static let privacyURL = URL(string: "https://example.com/privacy")!
+    static let termsURL = URL(string: "https://example.com/terms")!
+}
+'''
+
 
 class LegalLinksTests(unittest.TestCase):
     def scan(self, text, extras=None, incomplete=False):
@@ -415,6 +439,172 @@ class LegalLinksTests(unittest.TestCase):
           "legal.t": {"localizations": {"en": {"stringUnit": {"value": "Terms of Service"}}}}
         }}'''})
         self.assertEqual(['PASS', 'PASS'], [r['status'] for r in catalogue])
+
+    def test_navigation_container_preserves_screenshot_root_urls(self):
+        result = self.scan('''class Settings: UIViewController {
+          func setup() {
+            privacyButton.setTitle("Privacy Policy", for: .normal)
+            privacyButton.addTarget(self, action: #selector(openPrivacy), for: .touchUpInside)
+            termsButton.setTitle("Terms & Support", for: .normal)
+            termsButton.addTarget(self, action: #selector(openTerms), for: .touchUpInside)
+          }
+          @objc func openPrivacy() {
+            let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
+            let nav = UINavigationController(rootViewController: pane)
+            nav.modalPresentationStyle = .formSheet
+            present(nav, animated: true)
+          }
+          @objc func openTerms() {
+            let pane = SauceWashLegalPane(url: SauceWashLegal.termsURL, heading: "Terms & Support")
+            present(UINavigationController(rootViewController: pane), animated: true)
+          }
+        }''', {'LegalPane.swift': LEGAL_PANE})
+        self.assertEqual(['PASS', 'PASS'], [r['status'] for r in result])
+        self.assertEqual(['https://example.com/privacy', 'https://example.com/terms'], [r['url'] for r in result])
+        self.assertTrue(all(not any(key.startswith('_') for key in r) for r in result))
+
+    def test_terms_and_support_alias_is_explicit(self):
+        result = self.scan('''Button("Terms and Support") {
+          let pane = SauceWashLegalPane(url: SauceWashLegal.termsURL, heading: "Terms & Support")
+          present(UINavigationController(rootViewController: pane), animated: true)
+        }''', {'LegalPane.swift': LEGAL_PANE})
+        terms = [r for r in result if r['kind'] == 'terms']
+        self.assertEqual(['PASS'], [r['status'] for r in terms])
+        self.assertEqual('https://example.com/terms', terms[0]['url'])
+
+    def test_navigation_container_unknown_roots_do_not_pass(self):
+        for root in ('nil', 'getRoot()', 'rootFromServer', 'UINavigationController(rootViewController: pane)'):
+            with self.subTest(root=root):
+                result = self.privacy('''Button("Privacy Policy") {
+                  let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
+                  present(UINavigationController(rootViewController: ''' + root + '''), animated: true)
+                }''', {'LegalPane.swift': LEGAL_PANE})
+                self.assertEqual('NOT_VERIFIABLE', result['status'])
+                self.assertIsNone(result['url'])
+
+    def test_unused_navigation_and_wrong_root_do_not_borrow_pane(self):
+        for presentation in ('present(anotherController, animated: true)', 'present(UINavigationController(rootViewController: anotherController), animated: true)'):
+            result = self.privacy('''Button("Privacy Policy") {
+              let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
+              let unused = UINavigationController(rootViewController: pane)
+              ''' + presentation + '''
+            }''', {'LegalPane.swift': LEGAL_PANE})
+            self.assertEqual('NOT_VERIFIABLE', result['status'])
+
+    def test_wrapped_safari_remains_failure(self):
+        result = self.privacy('''Button("Privacy Policy") {
+          let pane = SFSafariViewController(url: URL(string: "https://example.com/privacy")!)
+          present(UINavigationController(rootViewController: pane), animated: true)
+        }''')
+        self.assertEqual('FAIL', result['status'])
+        self.assertEqual('https://example.com/privacy', result['url'])
+
+    def test_navigation_mutation_and_aliases_invalidate_only_presented_container(self):
+        for mutation in ('nav.setViewControllers([other], animated: false)', 'nav.viewControllers = [other]', 'let alias = nav; alias.setViewControllers([other], animated: false)'):
+            for order in ('before', 'after'):
+                with self.subTest(mutation=mutation, order=order):
+                    action = mutation + '; present(nav, animated: true)' if order == 'before' else 'present(nav, animated: true); ' + mutation
+                    result = self.privacy('''Button("Privacy Policy") {
+                      let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
+                      let nav = UINavigationController(rootViewController: pane)
+                      ''' + action + '''
+                    }''', {'LegalPane.swift': LEGAL_PANE})
+                    self.assertEqual('NOT_VERIFIABLE', result['status'])
+        result = self.privacy('''Button("Privacy Policy") {
+          let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
+          let unused = UINavigationController(rootViewController: pane)
+          unused.setViewControllers([other], animated: false)
+          present(pane, animated: true)
+        }''', {'LegalPane.swift': LEGAL_PANE})
+        self.assertEqual('PASS', result['status'])
+
+    def test_pushing_navigation_controller_does_not_pass(self):
+        result = self.privacy('''Button("Privacy Policy") {
+          let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
+          navigationController?.pushViewController(UINavigationController(rootViewController: pane), animated: true)
+        }''', {'LegalPane.swift': LEGAL_PANE})
+        self.assertEqual('NOT_VERIFIABLE', result['status'])
+
+    def test_support_uses_only_presented_terms_heading(self):
+        result = self.scan('''Button("Support") {
+          let pane = SauceWashLegalPane(url: SauceWashLegal.termsURL, heading: "User Agreement")
+          present(UINavigationController(rootViewController: pane), animated: true)
+        }''', {'LegalPane.swift': LEGAL_PANE})
+        terms = [r for r in result if r['kind'] == 'terms']
+        self.assertEqual(['PASS'], [r['status'] for r in terms])
+        self.assertEqual('https://example.com/terms', terms[0]['url'])
+
+    def test_plain_support_does_not_downgrade_real_terms_or_become_terms(self):
+        source = '''NavigationLink("Terms of Service") { LegalPage(url: URL(string: "https://example.com/terms")!) }
+          Button("Support") { UIApplication.shared.open(URL(string: "https://example.com/help")!) }
+        '''
+        result = self.scan(source)
+        terms = [r for r in result if r['kind'] == 'terms']
+        self.assertEqual(['PASS'], [r['status'] for r in terms])
+        only_help = self.scan('Button("Support") { openHelp() }')
+        terms = [r for r in only_help if r['kind'] == 'terms']
+        self.assertEqual(['FAIL'], [r['status'] for r in terms])
+        self.assertTrue(terms[0].get('missing'))
+
+    def test_unused_or_overwritten_heading_cannot_classify_support(self):
+        action = '''Button("Support") {
+          let pane = SauceWashLegalPane(url: SauceWashLegal.termsURL, heading: "Terms & Support")
+          present(UINavigationController(rootViewController: pane), animated: true)
+        }'''
+        for pane in (LEGAL_PANE.replace('title = heading', ''), LEGAL_PANE.replace('title = heading', 'title = heading; title = "Help"')):
+            result = self.scan(action, {'LegalPane.swift': pane})
+            terms = [r for r in result if r['kind'] == 'terms']
+            self.assertTrue(terms[0].get('missing'))
+        result = self.scan('''Button("Support") {
+          let unused = SauceWashLegalPane(url: SauceWashLegal.termsURL, heading: "Terms & Support")
+          present(HelpController(), animated: true)
+        }''', {'LegalPane.swift': LEGAL_PANE})
+        self.assertTrue(next(r for r in result if r['kind'] == 'terms').get('missing'))
+
+    def test_known_terms_heading_with_unresolved_load_is_unknown(self):
+        pane = LEGAL_PANE.replace('web.load(URLRequest(url: url))', 'loadDynamicDocument()')
+        result = self.scan('''Button("Support") {
+          let pane = SauceWashLegalPane(url: SauceWashLegal.termsURL, heading: "User Agreement")
+          present(UINavigationController(rootViewController: pane), animated: true)
+        }''', {'LegalPane.swift': pane})
+        terms = [r for r in result if r['kind'] == 'terms']
+        self.assertEqual(['NOT_VERIFIABLE'], [r['status'] for r in terms])
+        self.assertFalse(terms[0].get('missing'))
+
+    def test_support_bound_initializer_title_and_navigation_item(self):
+        action = '''Button("Support") {
+          let pane = SauceWashLegalPane(url: SauceWashLegal.termsURL, heading: "Terms & Support")
+          present(UINavigationController(rootViewController: pane), animated: true)
+        }'''
+        for assignment in ('title = heading', 'self.title = heading', 'navigationItem.title = heading', 'self.navigationItem.title = heading'):
+            with self.subTest(assignment=assignment):
+                pane = LEGAL_PANE.replace('title = heading', '').replace('super.init(nibName: nil, bundle: nil)', 'super.init(nibName: nil, bundle: nil)\n ' + assignment)
+                result = self.scan(action, {'LegalPane.swift': pane})
+                self.assertEqual('PASS', next(r for r in result if r['kind'] == 'terms')['status'])
+        pane = LEGAL_PANE.replace('title = heading', 'title = "Help"').replace('super.init(nibName: nil, bundle: nil)', 'super.init(nibName: nil, bundle: nil)\n title = heading')
+        result = self.scan(action, {'LegalPane.swift': pane})
+        self.assertTrue(next(r for r in result if r['kind'] == 'terms').get('missing'))
+
+    def test_optional_forced_and_self_navigation_mutations_invalidate_root(self):
+        for prefix in ('nav?', 'nav!', 'self.nav?', 'self.nav!'):
+            for suffix in ('.setViewControllers([other], animated: false)', '.viewControllers = [other]'):
+                with self.subTest(receiver=prefix, operation=suffix):
+                    declaration = ('self.nav = ' if prefix.startswith('self.') else 'var nav: UINavigationController? = ')
+                    result = self.privacy('''Button("Privacy Policy") {
+                      let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
+                      ''' + declaration + '''UINavigationController(rootViewController: pane)
+                      ''' + prefix + suffix + '''
+                      present(nav!, animated: true)
+                    }''', {'LegalPane.swift': LEGAL_PANE})
+                    self.assertEqual('NOT_VERIFIABLE', result['status'])
+                    self.assertIsNone(result['url'])
+        result = self.privacy('''Button("Privacy Policy") {
+          let pane = SauceWashLegalPane(url: SauceWashLegal.privacyURL, heading: "Privacy Policy")
+          var nav: UINavigationController? = UINavigationController(rootViewController: pane)
+          nav?.modalPresentationStyle = .formSheet
+          present(nav!, animated: true)
+        }''', {'LegalPane.swift': LEGAL_PANE})
+        self.assertEqual('PASS', result['status'])
 
 
 if __name__ == '__main__':

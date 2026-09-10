@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.0.5`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.0.6`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -102,6 +102,7 @@ IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或�
 - `LEGAL-001`：每个可识别入口必须有“协议入口 → 实际 URL → 页面封装 → WKWebView 加载”的关联证据。支持可静态解析的 SwiftUI、UIKit 和常见跨文件封装；仅存在 WebKit 导入、WKWebView 类、协议字样或 URL 常量都不等于入口接入。注释和说明字符串中的代码示例不作为功能证据。
 - 外部浏览器、`SFSafariViewController`、本地 HTML / 文件加载不满足本规则。SwiftUI `Link` / `openURL` 根据实际处理链判断；能确认自定义处理在应用内 WKWebView 打开该协议 URL 时可通过，不因关键词直接失败。
 - 同一协议多个入口分别检查，不能用一个正常入口掩盖另一个外跳入口。完整扫描缺少必要协议入口为 `FAIL`；源码读取不完整、动态 URL、动态路由或无法关联的封装为 `NOT_VERIFIABLE`，说明具体缺失的证据，不猜测为通过。
+- UIKit 协议页面可以通过 `UINavigationController(rootViewController:)` 包装后呈现；继续追踪真实根页面及其 URL，不要求为扫描器移除导航容器。识别 `Terms & Support` / `Terms and Support`；普通 `Support` 需要关联到实际呈现页面的用户协议标题才能归入用户协议，不能仅凭支持入口或 URL 字样判通过。
 - `LEGAL-002`：联网检查上述入口实际使用的 URL。每次审计对相同 URL 去重（忽略页面锚点）；返回成功状态及非空可读页面内容才通过。无实际 URL 不发送请求。
 
 联网使用不带 Cookie、认证信息和环境代理凭证的 HTTP(S) GET，正常校验证书；每次请求超时 10 秒，最多 5 次重定向，最多读取 1 MiB。初始 URL 及每一跳均验证地址，拒绝非 HTTP(S)、本机、内网或非公网目标。未知编码、超出读取限制或无法确认正文时保留需复核。
