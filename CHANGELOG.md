@@ -1,5 +1,11 @@
 # 版本更新日志
 
+## 1.0.10
+
+- 相册用途文案支持 export 及常见词形和“导出”，保留资源对象、最短长度与完整英文词边界检查。
+- 补齐 UIViewRepresentable 经 context.coordinator 调用辅助方法的 WKWebView 加载关联及参数传递，避免借用未调用或其它封装的同名方法。
+- 增加权限文案与 Coordinator 正反回归；保持 17 项清单、schema 2.0、无协议网络请求和目标项目只读。
+
 ## 1.0.9
 
 - 修复 SwiftUI NavigationLink / Button 使用自定义 Row(title:) 标签时漏掉协议入口的问题，关联外层 destination/action。

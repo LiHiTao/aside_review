@@ -119,6 +119,7 @@ class Value:
     text: str | None = None
     type_name: str | None = None
     args: dict[str, "Value"] = field(default_factory=dict)
+    definition: Definition | None = None
 
 
 def _kind(label):
@@ -426,6 +427,46 @@ class Analyzer:
         types = [d for d in self.definitions if d.kind == "type" and d.source is s and d.begin <= index < d.end]
         return min(types, key=lambda d: d.end - d.begin).name if types else None
 
+    def enclosing_type(self, s, index):
+        types = [d for d in self.definitions if d.kind == "type" and d.source is s and d.begin <= index < d.end]
+        return min(types, key=lambda d: d.end - d.begin) if types else None
+
+    def scoped_type(self, name, s, index):
+        candidates = [d for d in self.definitions if d.kind == "type" and d.name == name]
+        enclosing = self.enclosing_type(s, index)
+        if enclosing:
+            local = [d for d in candidates if d.source is s and enclosing.begin <= d.start < enclosing.end]
+            if local:
+                candidates = local
+            else:
+                candidates = [d for d in candidates if self.enclosing_type(d.source, d.start) is None]
+        else:
+            candidates = [d for d in candidates if self.enclosing_type(d.source, d.start) is None]
+        return candidates[0] if len(candidates) == 1 else None
+
+    def coordinator_value(self, page):
+        factories = [d for d in self.definitions if d.kind == "func" and d.name == "makeCoordinator"
+                     and self.enclosing_type(d.source, d.start) is page]
+        if len(factories) != 1:
+            return Value()
+        factory = factories[0]
+        s = factory.source
+        header = s.text(factory.start, factory.begin - 1)
+        match = re.search(r"->([A-Za-z_]\w*)$", header)
+        # An explicit factory return type is sufficient association; never search
+        # arbitrary nested methods for a coincidentally named Coordinator.
+        if match:
+            target = self.scoped_type(match[1], s, factory.start)
+            return Value(type_name=match[1], definition=target) if target else Value()
+        start = factory.begin
+        if start < factory.end and s.tokens[start].text == "return":
+            start += 1
+        end = _end_expr(s, start, factory.end)
+        if end != factory.end:
+            return Value()
+        result = self.value(s, start, end)
+        return result if result.definition else Value()
+
     def value(self, s, a, b, env=None, seen=None):
         env = env or {}
         seen = seen or set()
@@ -461,7 +502,7 @@ class Analyzer:
                 key = args.get("forInfoDictionaryKey", Value()).text
                 values = self.info_values.get(key, [])
                 return Value(text=values[0]) if len(values) == 1 else Value()
-            return Value(type_name=name, args=args)
+            return Value(type_name=name, args=args, definition=self.scoped_type(name, s, a))
         # Objective-C NSURL / NSURLRequest expressions; brackets are balanced.
         if s.tokens[a].text == "[" and s.pairs.get(a) == b - 1:
             if s.path.suffix == ".swift":
@@ -493,8 +534,14 @@ class Analyzer:
             return env[name]
         if "." in name:
             base, prop = name.rsplit(".", 1)
-            if base in env and prop in env[base].args:
-                return env[base].args[prop]
+            base_value = env.get(base)
+            if base_value is None and "." in base:
+                parts = base.split(".")
+                base_value = env.get(parts[0], Value())
+                for part in parts[1:]:
+                    base_value = base_value.args.get(part, Value())
+            if base_value is not None and prop in base_value.args:
+                return base_value.args[prop]
         if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", name):
             return Value()
         key = (id(s), a, name)
@@ -585,9 +632,15 @@ class Analyzer:
         if constructor:
             results += self.trace(constructor.source, constructor.begin, constructor.end,
                                   arguments, seen, destination=True)
+        coordinator = self.coordinator_value(d)
         for method in methods:
+            bindings = self._bind(method, properties)
+            if method.name in ("makeUIView", "updateUIView", "makeUIViewController", "updateUIViewController"):
+                for _, param, param_type in method.params:
+                    if param_type in ("Context", "UIViewRepresentableContext<Self>", "UIViewControllerRepresentableContext<Self>"):
+                        bindings[param] = Value(args={"coordinator": coordinator})
             results += self.trace(method.source, method.begin, method.end,
-                                  self._bind(method, properties), seen, destination=True)
+                                  bindings, seen, destination=True)
         # SwiftUI view composition (NavigationLink -> wrapper View -> representable).
         if not methods:
             for j in range(d.begin, d.end - 2):
@@ -699,10 +752,8 @@ class Analyzer:
         assignments = set()
         # A typed WKWebView property is evidence only in the current destination.
         if destination:
-            owner = self.owner(s, a)
-            types = [d for d in self.definitions if d.kind == "type" and d.name == owner and d.source is s]
-            if types:
-                d = types[0]
+            d = self.enclosing_type(s, a)
+            if d:
                 for i in range(d.begin, d.end - 2):
                     if s.tokens[i].text in ("var", "let") and s.tokens[i + 2].text == ":" and i + 3 < d.end and s.tokens[i + 3].text == "WKWebView":
                         is_member = self.owner(s, i) == d.name and not any(f.kind == "func" and f.source is s and f.begin <= i < f.end for f in self.definitions)
@@ -789,6 +840,11 @@ class Analyzer:
                 close = s.pairs[i + 1]
                 args = {label: self.value(s, x, y, env) for label, x, y in _args(s, i + 2, close)}
                 receiver = _simple_receiver(s, i)
+                receiver_start = i - 2
+                while receiver_start >= a + 2 and s.tokens[receiver_start - 1].text == ".":
+                    receiver_start -= 2
+                has_receiver = i > a and s.tokens[i - 1].text == "."
+                receiver_value = self.value(s, receiver_start, i - 1, env) if has_receiver else Value()
                 if token.text == "setViewControllers":
                     container = env.get(receiver or "", Value())
                     if container.type_name in ("UINavigationController", "UIKit.UINavigationController"):
@@ -826,16 +882,20 @@ class Analyzer:
                     # ordinary unused Safari variables are still not evidence.
                     if destination:
                         results += self.destination(Value(type_name=token.text, args=args), s, i, seen)
-                elif destination and token.text[:1].isupper() and token.text not in ("URL", "URLRequest", "WKWebView"):
+                elif destination and not has_receiver and token.text[:1].isupper() and token.text not in ("URL", "URLRequest", "WKWebView") and self.scoped_type(token.text, s, i):
                     # Inside a SwiftUI destination, child view construction is
                     # itself its declarative presentation.
                     if not (i > a and s.tokens[i - 1].text == "="):
                         results += self.destination(Value(type_name=token.text, args=args), s, i, seen)
                 elif token.text not in ("URL", "URLRequest", "WKWebView"):
                     owner = self.owner(s, i)
+                    target_type = receiver_value.definition if has_receiver and receiver != "self" else self.enclosing_type(s, i)
                     methods = [d for d in self.definitions if d.kind == "func" and d.name == token.text
-                               and (d.owner == owner if receiver in (None, "self") else d.owner == receiver)]
-                    if not methods and receiver is None:
+                               and (self.enclosing_type(d.source, d.start) is target_type if target_type is not None
+                                    else d.owner == receiver if has_receiver else d.owner == owner)]
+                    if has_receiver and receiver != "self" and target_type is None and receiver not in {d.name for d in self.definitions if d.kind == "type"}:
+                        methods = []
+                    if not methods and not has_receiver:
                         methods = [d for d in self.definitions if d.kind == "func" and d.name == token.text and d.owner is None]
                     if len(methods) == 1:
                         d = methods[0]

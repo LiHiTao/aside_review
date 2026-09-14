@@ -128,3 +128,7 @@ META-003 必须复用 IAP-003 的状态和静态证据，避免同一商品提�
 ### 1.0.9 入口兼容
 
 SwiftUI 导航和按钮的 label 闭包可从自定义 Row 的 title 参数识别协议名称，action/destination 由外层控件提供。保留 Swift UIKit 与 Objective-C（.m/.mm）的事件、页面及 WKWebView 加载关联，不因自定义 Row 自身没有 action 而漏掉外层入口。相邻标题、注释和无关 WebView 不作为关联证据。
+
+### 1.0.10 兼容
+
+相册权限用途动作包含 export/exports/exported/exporting 和“导出”；英文新增动作使用完整词匹配，资源对象和长度门槛保持不变。协议检查沿实际调用关联 UIViewRepresentable 的 Coordinator 及其接收的 WKWebView 参数，不把未调用方法或其它页面的同名 Coordinator 作为证据；无法解析的动态关联仍需复核。

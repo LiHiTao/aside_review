@@ -167,6 +167,7 @@ PURPOSE_SPECS: dict[str, dict[str, Any]] = {
         "patterns": (r"PHPhotoLibrary", r"PhotosPicker", r"PHPicker", r"UIImagePickerController", r"UIImageWriteToSavedPhotosAlbum", r"\.photoLibrary\b"),
         "objects": ("photo", "photos", "photo library", "相册", "照片"),
         "actions": ("choose", "select", "save", "add", "browse", "选择", "保存", "添加"),
+        "action_patterns": (r"\bexport(?:s|ed|ing)?\b", "导出"),
     },
     "microphone": {
         "label": "麦克风",
@@ -1436,7 +1437,7 @@ class Auditor:
         if len(value.strip()) < minimum:
             return False, f"只有 {len(value.strip())} 个字符，少于 {minimum}"
         has_object = any(item.lower() in lowered for item in spec["objects"])
-        has_action = any(item.lower() in lowered for item in spec["actions"])
+        has_action = any(item.lower() in lowered for item in spec["actions"]) or contains_any(value, spec.get("action_patterns", ()))
         if has_object and has_action:
             return True, "包含资源/数据对象和使用动作"
         missing = []

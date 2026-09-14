@@ -421,6 +421,29 @@ class AuditTests(unittest.TestCase):
                 self.assertEqual(findings["ATT-002"]["status"], expected)
                 self.assertEqual(findings["PERM-002"]["status"], "PASS")
 
+    def test_photo_export_purpose(self) -> None:
+        cases = [
+            ("Photo Library write access is used when you export a stitched photography video to Photos.", "PASS"),
+            ("Photos permission is used for exporting your finished video.", "PASS"),
+            ("The app exports finished videos to Photos with your permission.", "PASS"),
+            ("Your finished video is exported to Photos with your permission.", "PASS"),
+            ("应用需要相册写入权限，以便将您制作完成的视频导出到相册。", "PASS"),
+            ("Photo Library access is required by the exporter component.", "FAIL"),
+            ("Photo Library access is required for this feature to work.", "FAIL"),
+            ("Permission is required to export the completed document.", "FAIL"),
+        ]
+        for value, expected in cases:
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_fixture(root)
+                path = root / "Carvory" / "Info.plist"
+                values = plistlib.loads(path.read_bytes())
+                values["NSPhotoLibraryAddUsageDescription"] = value
+                path.write_bytes(plistlib.dumps(values))
+                report = Auditor(root, DEFAULT_POLICY).run().report()
+                finding = next(f for f in report["findings"] if f["id"] == "PERM-002")
+                self.assertEqual(finding["status"], expected, finding)
+
     def test_permission_purpose_does_not_require_theme_match(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ios-aside-review-test-") as directory:
             root = Path(directory)

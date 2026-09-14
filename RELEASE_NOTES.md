@@ -1,6 +1,5 @@
-# 1.0.9
+# 1.0.10
 
-- 修复 SwiftUI NavigationLink / Button 使用自定义 Row(title:) 标签时漏掉协议入口的问题，关联外层 destination/action。
-- 修复 if let 条件绑定吞掉后续页面内容的问题，保留条件体中的关联加载调用。
-- 补充 Swift、Objective-C（.m/.mm）协议入口与 WKWebView 加载回归，保留明确外跳和混合入口失败判定。
-- 添加自定义 Row、跨文件协议页面、本地 HTML 加载的脱敏集成样例；保持 17 项清单、schema 2.0 和无协议网络请求。
+- 相册用途文案支持 export 及常见词形和“导出”，保留资源对象、最短长度与完整英文词边界检查。
+- 补齐 UIViewRepresentable 经 context.coordinator 调用辅助方法的 WKWebView 加载关联及参数传递，避免借用未调用或其它封装的同名方法。
+- 增加权限文案与 Coordinator 正反回归；保持 17 项清单、schema 2.0、无协议网络请求和目标项目只读。

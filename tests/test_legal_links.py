@@ -57,6 +57,70 @@ class LegalLinksTests(unittest.TestCase):
     def privacy(self, text, extras=None):
         return [v for v in self.scan(text, extras) if v['kind'] == 'privacy'][0]
 
+    def coordinator_fixture(self, factory="func makeCoordinator() -> Coordinator { Coordinator() }", call="context.coordinator.LoadLocal(into: webView)", helper=None):
+        helper = helper or "func LoadLocal(into webView: WKWebView) { Reload(into: webView) } func Reload(into webView: WKWebView) { webView.loadFileURL(file, allowingReadAccessTo: directory) }"
+        return '''struct Settings: View { var body: some View {
+            NavigationLink("Privacy Policy") { Document() }
+        } }
+        struct Document: View { var body: some View { LocalHTML() } }
+        struct LocalHTML: UIViewRepresentable {
+            FACTORY
+            func makeUIView(context: Context) -> WKWebView { WKWebView() }
+            func updateUIView(_ webView: WKWebView, context: Context) { CALL }
+            class Coordinator { HELPER }
+        }
+        '''.replace("FACTORY", factory).replace("CALL", call).replace("HELPER", helper)
+
+    def test_coordinator_explicit_factory_and_cross_method_loading(self):
+        result = self.privacy(self.coordinator_fixture())
+        self.assertEqual(result['status'], 'PASS')
+        self.assertTrue(any('loadFileURL' in item['excerpt'] for item in result['evidence']))
+
+    def test_coordinator_constructed_factory_and_alias(self):
+        for factory in ('func makeCoordinator() { Coordinator() }', 'func makeCoordinator() { return Coordinator() }'):
+            with self.subTest(factory=factory):
+                result = self.privacy(self.coordinator_fixture(factory, 'let loader = context.coordinator\n loader.LoadLocal(into: webView)'))
+                self.assertEqual(result['status'], 'PASS')
+
+    def test_coordinator_make_view_local_webview(self):
+        source = self.coordinator_fixture(call='')
+        source = source.replace('-> WKWebView { WKWebView() }', '-> WKWebView { let webView = WKWebView()\n context.coordinator.LoadLocal(into: webView)\n return webView }')
+        self.assertEqual(self.privacy(source)['status'], 'PASS')
+
+    def test_coordinator_uncalled_helper_or_unknown_factory_not_evidence(self):
+        for source in (
+            self.coordinator_fixture(call=''),
+            self.coordinator_fixture(factory=''),
+            self.coordinator_fixture(factory='func makeCoordinator() { remoteFactory() }'),
+            self.coordinator_fixture(call='other.coordinator.LoadLocal(into: webView)'),
+            self.coordinator_fixture(call='let unused = { context.coordinator.LoadLocal(into: webView) }'),
+        ):
+            with self.subTest(source=source):
+                self.assertEqual(self.privacy(source)['status'], 'NOT_VERIFIABLE')
+
+    def test_coordinator_other_same_named_type_cannot_lend_helper(self):
+        source = self.coordinator_fixture(helper='func LoadLocal(into webView: WKWebView) {}')
+        source += '''struct Unrelated: UIViewRepresentable {
+            class Coordinator { func LoadLocal(into webView: WKWebView) { webView.loadFileURL(file, allowingReadAccessTo: directory) } }
+        }'''
+        self.assertEqual(self.privacy(source)['status'], 'NOT_VERIFIABLE')
+        # An absent local type must not resolve to a nested type of another view.
+        source = source.replace('class Coordinator { func LoadLocal(into webView: WKWebView) {} }', '')
+        self.assertEqual(self.privacy(source)['status'], 'NOT_VERIFIABLE')
+        source = self.coordinator_fixture() + '''struct Unrelated {
+            class Coordinator { func Reload(into webView: WKWebView) {} }
+        }'''
+        self.assertEqual(self.privacy(source)['status'], 'PASS')
+
+    def test_coordinator_other_type_property_cannot_lend_webview(self):
+        source = 'struct Other { class Coordinator { var web: WKWebView } }\n'
+        source += self.coordinator_fixture(helper='func LoadLocal(into input: WKWebView) { web.loadFileURL(file, allowingReadAccessTo: directory) }')
+        self.assertEqual(self.privacy(source)['status'], 'NOT_VERIFIABLE')
+
+    def test_coordinator_explicit_external_open_still_fails(self):
+        source = self.coordinator_fixture(helper='func LoadLocal(into webView: WKWebView) { webView.loadFileURL(file, allowingReadAccessTo: directory)\n UIApplication.shared.open(url) }')
+        self.assertEqual(self.privacy(source)['status'], 'FAIL')
+
     def test_two_protocols_crossfile_wrapper(self):
         result = self.scan('''struct Settings: View { var body: some View {
           VStack {
