@@ -62,7 +62,7 @@ def identity_fields(raw: str) -> tuple[str, list[IdentityField]]:
                 continue
             if enclosing is not None and code[enclosing] == "(":
                 header = _without_generic_arguments(code[:enclosing])
-                if re.search(r"(?:\bfunc\s+[A-Za-z_][A-Za-z_0-9]*|\binit[?!]?)\s*$", header):
+                if not re.search(r"\.\s*init[?!]?\s*$", header) and re.search(r"(?:\bfunc\s+[A-Za-z_][A-Za-z_0-9]*|(?<![.\w])init[?!]?)\s*$", header):
                     continue
         matches.append(match)
     records = {}
@@ -85,6 +85,20 @@ def identity_fields(raw: str) -> tuple[str, list[IdentityField]]:
             begin, end = record + 1, ends[record]
             name = re.search(r"([A-Za-z_][A-Za-z_0-9]*)\s*$", _without_generic_arguments(code[:record]))
             initializer = name.group(1) if name else ""
+            if initializer == "init":
+                header = _without_generic_arguments(code[:record])
+                type_header = re.sub(r"\.\s*init\s*$", "", header)
+                qualified = re.search(r"([A-Za-z_][A-Za-z_0-9]*)\s*$", _without_generic_arguments(type_header)) if type_header != header else None
+                if qualified:
+                    initializer = qualified.group(1)
+                else:
+                    # Only direct array elements inherit the declared element
+                    # type; a nested .init belongs to its own argument type.
+                    array = parents.get(record)
+                    if array is not None and code[array] == "[":
+                        declaration = re.search(r"\b(?:let|var)\s+\w+\s*:\s*\[\s*([A-Za-z_][\w.]*)\s*\]\s*=\s*$", code[:array])
+                        if declaration:
+                            initializer = declaration.group(1)
         # Hide child expressions, preventing nested prices/labels leaking out.
         context = list(clean[begin:end])
         for child, parent in parents.items():

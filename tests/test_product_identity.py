@@ -113,3 +113,131 @@ class ProductIdentityTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class ProductInitializerRegressionTests(unittest.TestCase):
+    scan = ProductIdentityTests.scan
+    def test_init_call_forms_and_type_inference(self):
+        for call in ['.init', '. init', 'MemoProductTier.init', 'MemoProductTier. init', 'MemoProductTier<String>.init']:
+            with self.subTest(call=call):
+                auditor, checks = self.scan('let tiers: [MemoProductTier] = [' + call + '(id: "com.extra.SKU")]')
+                self.assertEqual([p.product_id for p in auditor.code_products], ['com.extra.SKU'])
+                self.assertEqual(checks['IAP-002']['status'], 'FAIL')
+                auditor, checks = self.scan('let tiers: [MemoProductTier] = [' + call + '(id: "1", productID: "com.huvex.memos1")]')
+                self.assertEqual([p.product_id for p in auditor.code_products], ['com.huvex.memos1'])
+                self.assertEqual(auditor.dynamic_code_products, [])
+
+    def test_business_init_and_nested_init_do_not_inherit_product_type(self):
+        for source in ['let rows: [Notice] = [.init(id: "plain.row")]',
+                       'let tiers: [MemoProductTier] = [.init(productID: "com.huvex.memos1", badge: .init(id: "plain.row"))]']:
+            auditor, _ = self.scan(source)
+            self.assertNotIn('plain.row', [p.product_id for p in auditor.code_products])
+
+    def test_foreach_static_catalogue_reference(self):
+        auditor, checks = self.scan('''let catalog: [StoreProduct] = [.init(id: "com.huvex.memos1")]
+        ForEach(catalog) { product in Button("Buy") { purchase(productID: product.id) } }''')
+        self.assertEqual(auditor.dynamic_code_products, [])
+        self.assertEqual(checks['IAP-002']['status'], 'PASS')
+
+    def test_foreach_unresolved_sources_and_shadowing(self):
+        catalog = 'let catalog: [StoreProduct] = [.init(id: "com.huvex.memos1")]\n'
+        for body in ['let product = remote; purchase(productID: product.id)',
+                     'product = remote; purchase(productID: product.id)',
+                     'product.id = remoteID; purchase(productID: product.id)',
+                     'purchase(productID: unknown.id)',
+                     'purchase(productID: product.id + suffix)']:
+            auditor, checks = self.scan(catalog + 'ForEach(catalog) { product in ' + body + ' }')
+            self.assertTrue(auditor.dynamic_code_products, body)
+            self.assertEqual(checks['IAP-002']['status'], 'NOT_VERIFIABLE')
+        for prefix in ['let catalog = remote\n', '']:
+            source = catalog + 'func other() { ' + prefix + 'ForEach(remoteCatalog) { product in purchase(productID: product.id) } }'
+            auditor, _ = self.scan(source)
+            self.assertTrue(auditor.dynamic_code_products)
+        auditor, _ = self.scan(catalog + 'func other() { let catalog = remote; ForEach(catalog) { product in purchase(productID: product.id) } }')
+        self.assertTrue(auditor.dynamic_code_products)
+
+    def test_explicit_identity_not_local_sequence_reference(self):
+        auditor, _ = self.scan('''let catalog: [StoreProduct] = [.init(id: "1", productID: "com.huvex.memos1")]
+        ForEach(catalog) { product in purchase(productID: product.id) }''')
+        self.assertTrue(auditor.dynamic_code_products)
+
+    def test_partial_dynamic_catalogue_stays_unknown(self):
+        auditor, checks = self.scan('''let catalog: [StoreProduct] = [.init(id: "com.huvex.memos1"), .init(id: remote)]
+        ForEach(catalog) { product in purchase(productID: product.id) }''')
+        self.assertEqual(len(auditor.dynamic_code_products), 2)
+        self.assertEqual(checks['IAP-002']['status'], 'NOT_VERIFIABLE')
+
+    def test_typed_transaction_read_is_not_new_product_but_purchase_is(self):
+        source = 'func completed(transaction: SKPaymentTransaction) { let productID = transaction.payment.productIdentifier }'
+        auditor, _ = self.scan(source)
+        self.assertEqual(auditor.dynamic_code_products, [])
+        for source in ['func completed(transaction: OtherTransaction) { let productID = transaction.payment.productIdentifier }',
+                       'func completed(transaction: SKPaymentTransaction) { purchase(productID: transaction.payment.productIdentifier) }',
+                       'func completed(transaction: SKPaymentTransaction) { StoreProduct(productID: transaction.payment.productIdentifier) }']:
+            auditor, _ = self.scan(source)
+            self.assertEqual(len(auditor.dynamic_code_products), 1)
+
+    def test_cross_file_qualified_catalogue(self):
+        with tempfile.TemporaryDirectory(prefix='aside-product-reference-') as directory:
+            root = Path(directory)
+            (root / 'Catalog.swift').write_text('enum Catalog { static let tiers: [StoreProduct] = [.init(productID: "com.example.sku")] }')
+            (root / 'View.swift').write_text('ForEach(Catalog.tiers) { product in purchase(productID: product.productID) }')
+            auditor = Auditor(root).run()
+            self.assertEqual([p.product_id for p in auditor.code_products], ['com.example.sku'])
+            self.assertEqual(auditor.dynamic_code_products, [])
+
+    def test_duplicate_type_cannot_lend_catalogue(self):
+        auditor, _ = self.scan('''enum Catalog { static let tiers: [StoreProduct] = [.init(id: "com.huvex.memos1")] }
+        struct Other { enum Catalog { static let tiers = remote } }
+        ForEach(Catalog.tiers) { product in purchase(productID: product.id) }''')
+        self.assertTrue(auditor.dynamic_code_products)
+
+    def test_nested_catalogue_not_visible_outside_function(self):
+        auditor, _ = self.scan('''func setup() { let catalog: [StoreProduct] = [.init(id: "com.huvex.memos1")] }
+        ForEach(catalog) { product in purchase(productID: product.id) }''')
+        self.assertTrue(auditor.dynamic_code_products)
+
+    def test_known_catalogue_does_not_hide_other_unknown_purchase(self):
+        auditor, _ = self.scan('''let catalog: [StoreProduct] = [.init(id: "com.huvex.memos1")]
+        ForEach(catalog) { product in purchase(productID: product.id) }
+        purchase(productID: remoteID)''')
+        self.assertEqual(len(auditor.dynamic_code_products), 1)
+
+    def test_function_and_closure_parameter_shadowing(self):
+        base = 'let catalog: [StoreProduct] = [.init(id: "com.huvex.memos1")]\n'
+        sources = [
+            'func view(catalog: [StoreProduct]) { ForEach(catalog) { product in purchase(productID: product.id) } }',
+            'remote.withCatalog { catalog in ForEach(catalog) { product in purchase(productID: product.id) } }',
+            'ForEach(catalog) { product in func buy(product: StoreProduct) { purchase(productID: product.id) } }',
+            'ForEach(catalog) { product in other { (product: StoreProduct) in purchase(productID: product.id) } }',
+            'ForEach(catalog) { product in other { [weak self] (product: StoreProduct) in purchase(productID: product.id) } }',
+            'ForEach(catalog) { product in func buy<T>(product: T) { purchase(productID: product.id) } }',
+            'ForEach(catalog) { product in for product in remote { purchase(productID: product.id) } }',
+        ]
+        for source in sources:
+            with self.subTest(source=source):
+                auditor, _ = self.scan(base + source)
+                self.assertTrue(auditor.dynamic_code_products)
+        auditor, _ = self.scan('''enum Catalog { static let tiers: [StoreProduct] = [.init(id: "com.huvex.memos1")] }
+        func view(Catalog: Provider) { ForEach(Catalog.tiers) { product in purchase(productID: product.id) } }''')
+        self.assertTrue(auditor.dynamic_code_products)
+
+    def test_catalogue_transformations_are_unresolved(self):
+        for suffix in ['.map { _ in remote }', ' + remoteProducts', '.replacingProducts()', '\n.map { _ in remote }']:
+            auditor, _ = self.scan('let catalog: [StoreProduct] = [.init(id: "com.huvex.memos1")]' + suffix + '\nForEach(catalog) { product in purchase(productID: product.id) }')
+            self.assertTrue(auditor.dynamic_code_products, suffix)
+
+    def test_transaction_parameter_shadowing_is_unresolved(self):
+        for body in ['func other(transaction: Other) { let productID = transaction.payment.productIdentifier }',
+                     'remote { transaction in let productID = transaction.payment.productIdentifier }']:
+            auditor, _ = self.scan('func done(transaction: SKPaymentTransaction) { ' + body + ' }')
+            self.assertTrue(auditor.dynamic_code_products, body)
+
+    def test_nested_child_product_cannot_define_parent_identity(self):
+        auditor, _ = self.scan('''let catalog = [Notice(child: StoreProduct(id: "com.huvex.memos1"))]
+        ForEach(catalog) { product in purchase(productID: product.id) }''')
+        self.assertTrue(auditor.dynamic_code_products)
+
+    def test_nested_child_identity_label_cannot_lend_to_parent(self):
+        auditor, _ = self.scan('''let catalog = [StoreProduct(id: "com.huvex.memos1", child: StoreProduct(productID: "com.huvex.memos1"))]
+        ForEach(catalog) { product in purchase(productID: product.productID) }''')
+        self.assertTrue(auditor.dynamic_code_products)

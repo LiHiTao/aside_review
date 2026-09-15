@@ -26,6 +26,7 @@ try:
     from .launch_membership import evaluate_membership
     from .code_lines import audit_code_lines
     from .product_context import identity_fields
+    from .product_references import ProductReferences, field_expression
     from .legal_links import analyze_legal_links
 except ImportError:
     from update_skill import UpdateError, ensure_latest
@@ -33,6 +34,7 @@ except ImportError:
     from launch_membership import evaluate_membership
     from code_lines import audit_code_lines
     from product_context import identity_fields
+    from product_references import ProductReferences, field_expression
     from legal_links import analyze_legal_links
 
 
@@ -749,6 +751,8 @@ class Auditor:
         name_pattern = re.compile(r"(?:title|name|referenceName|reference_name)\s*[:=]\s*[\"']([^\"']+)[\"']", flags=re.IGNORECASE)
         known_ids = {record.product_id for record in self.iap_records if record.product_id}
         self.dynamic_code_products = []
+        unresolved = []
+        identified = {}
         for path, raw in self.source_texts.items():
             if path.suffix.lower() not in SOURCE_EXTENSIONS:
                 continue
@@ -762,12 +766,9 @@ class Auditor:
                     # Property forwarding in model initializers is not another
                     # catalogue entry (self.productId = productId).
                     member_assignment = bool(re.search(r"\.\s*$", clean[:field.start]))
-                    if explicit and not member_assignment:
-                        self.dynamic_code_products.append({
-                            "path": self.rel(path),
-                            "line": line_number(raw, field.start),
-                            "excerpt": "商品 ID 为动态表达式，无法静态解析",
-                        })
+                    product_initializer = bool(re.search(r"product|iap|sku|purchase", field.initializer, re.I))
+                    if (explicit or product_initializer) and not member_assignment:
+                        unresolved.append((path, raw, clean, field))
                     continue
                 product_id = match.group("value").strip()
                 context = field.context
@@ -793,6 +794,7 @@ class Auditor:
                     })
                     continue
                 names = [item.group(1).strip() for item in name_pattern.finditer(context)]
+                identified.setdefault(path, set()).add(field.start)
                 products.append(
                     CodeProduct(
                         path=path,
@@ -802,6 +804,21 @@ class Auditor:
                         names=list(dict.fromkeys(names)),
                     )
                 )
+        references = ProductReferences(self.source_texts, identified)
+        for path, raw, clean, field in unresolved:
+            expression = field_expression(clean, field)
+            if references.is_catalogue_reference(path, field.start, expression):
+                continue
+            # Transaction result reads are observations, never catalogue
+            # definitions or purchase arguments. Restrict this to let/var
+            # assignments, not calls with an identically named label.
+            assignment = bool(re.search(r"\b(?:let|var)\s*$", clean[:field.start]))
+            if assignment and references.is_transaction_read(path, field.start, expression):
+                continue
+            self.dynamic_code_products.append({
+                "path": self.rel(path), "line": line_number(raw, field.start),
+                "excerpt": "商品 ID 为动态表达式，购买参数或目录来源无法静态关联",
+            })
         unique: dict[tuple[str, str, int], CodeProduct] = {}
         for product in products:
             unique[(str(product.path), product.product_id, product.line)] = product
