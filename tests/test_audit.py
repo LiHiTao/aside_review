@@ -242,7 +242,7 @@ class AuditTests(unittest.TestCase):
                 self.assertEqual(by_id["IAP-002"]["status"], "FAIL")
                 self.assertEqual(by_id["IAP-006"]["status"], "FAIL")
 
-    def test_dynamic_product_ids_do_not_become_false_literal_failures_or_passes(self) -> None:
+    def test_dynamic_product_ids_are_excluded_from_static_checks(self) -> None:
         for declaration in (
             r'let productID = "com.example.\(tier.productId)"',
             r'let item = StoreProduct(id: "com.example.\(tier.productId)")',
@@ -257,8 +257,8 @@ class AuditTests(unittest.TestCase):
                 self.assertEqual(len(auditor.dynamic_code_products), 1)
                 checks = next(f for f in auditor.findings if f["id"] == "IAP-SUMMARY")["details"]
                 by_id = {f["id"]: f for f in checks}
-                self.assertEqual(by_id["IAP-002"]["status"], "NOT_VERIFIABLE")
-                self.assertEqual(by_id["IAP-006"]["status"], "NOT_VERIFIABLE")
+                self.assertEqual(by_id["IAP-002"]["status"], "PASS")
+                self.assertEqual(by_id["IAP-006"]["status"], "PASS")
 
     def test_broken_fixture_detects_submission_restore_and_delegate(self) -> None:
         with tempfile.TemporaryDirectory(prefix="ios-aside-review-test-") as directory:

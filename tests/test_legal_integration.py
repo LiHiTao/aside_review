@@ -17,6 +17,48 @@ class LegalIntegrationTests(unittest.TestCase):
     def setUp(self):
         assert_no_audit_network(self)
 
+    def test_selector_factory_with_local_buttons_and_no_web_delegate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Settings.swift").write_text('''import UIKit
+class Settings: UIViewController {
+    override func viewDidLoad() {
+        let privacy = rowButton("Privacy Policy", action: #selector(showPrivacy))
+        let terms = rowButton("Terms & Support", action: #selector(showTerms))
+        stack.addArrangedSubview(privacy)
+        stack.addArrangedSubview(terms)
+    }
+    private func rowButton(_ title: String, action: Selector) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setTitle(title, for: .normal)
+        button.addTarget(self, action: action, for: .touchUpInside)
+        return
+            button
+    }
+    @objc private func showPrivacy() { navigationController?.pushViewController(PolicyPage(kind: .privacy), animated: true) }
+    @objc private func showTerms() { navigationController?.pushViewController(PolicyPage(kind: .terms), animated: true) }
+}
+''')
+            (root / "Policy.swift").write_text('''import UIKit
+import WebKit
+class PolicyPage: UIViewController {
+    enum Kind { case privacy, terms }
+    let kind: Kind
+    let web = WKWebView(frame: .zero)
+    init(kind: Kind) { self.kind = kind; super.init(nibName: nil, bundle: nil) }
+    override func viewDidLoad() { reloadPage() }
+    private func reloadPage() { web.load(URLRequest(url: RemoteConfig.url(for: kind))) }
+}
+''')
+            before = {p.name: p.read_bytes() for p in root.iterdir()}
+            report = Auditor(root).run().report()
+            finding = next(f for f in report["findings"] if f["id"] == "LEGAL-001")
+            self.assertEqual(finding["status"], "PASS", finding)
+            self.assertEqual(len(finding["details"]), 2)
+            self.assertEqual(len(report["findings"]), 17)
+            self.assertEqual(report["schema_version"], "2.0")
+            self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
+
     def test_custom_navigation_labels_and_local_html_are_associated(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

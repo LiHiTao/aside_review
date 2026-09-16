@@ -942,22 +942,20 @@ class Auditor:
             )
             add_check(
                 "IAP-002",
-                "FAIL" if missing_in_json or price_mismatches or (missing_in_code and not self.dynamic_code_products) else "NOT_VERIFIABLE" if self.dynamic_code_products else "PASS",
+                "FAIL" if missing_in_json or missing_in_code or price_mismatches else "PASS",
                 "代码与 JSON 内购配置一致性",
-                "商品 ID 和价格映射一致",
+                "已解析的静态商品 ID 和可比价格映射一致",
                 "；".join(
                     part
                     for part in (
-                        f"代码 {len(code_by_id)} 项 / JSON {len(json_by_id)} 项",
+                        f"静态代码 {len(code_by_id)} 项 / JSON {len(json_by_id)} 项",
                         f"代码缺失 {missing_in_code} 项" if missing_in_code else "",
                         f"JSON 缺失 {missing_in_json} 项" if missing_in_json else "",
                         f"价格不一致 {price_mismatches} 项" if price_mismatches else "",
-                        "存在动态商品 ID，无法确认完整映射" if self.dynamic_code_products else "",
                     )
                     if part
                 ),
-                manual_check="在 StoreKit 或 App Store Connect 中核对动态商品 ID 和完整映射。" if self.dynamic_code_products else None,
-                evidence=product_evidence + self.dynamic_code_products,
+                evidence=product_evidence,
             )
         else:
             add_check(
@@ -1055,11 +1053,10 @@ class Auditor:
             total_ids = len(product_ids)
             add_check(
                 "IAP-006",
-                "FAIL" if lowercase_total != total_ids else "NOT_VERIFIABLE" if self.dynamic_code_products else "PASS",
+                "FAIL" if lowercase_total != total_ids else "PASS",
                 "product ID 大小写",
-                "所有 product ID 全小写",
-                f"{lowercase_total}/{total_ids} 项静态 ID 全小写" + ("；动态商品 ID 大小写无法确认" if self.dynamic_code_products else ""),
-                manual_check="在 StoreKit 或 App Store Connect 中核对动态商品 ID 的大小写。" if self.dynamic_code_products else None,
+                "已解析的静态 product ID 全小写",
+                f"{lowercase_total}/{total_ids} 项静态 ID 全小写",
                 evidence=product_evidence,
             )
         else:
@@ -1067,7 +1064,7 @@ class Auditor:
                 "IAP-006",
                 "NOT_VERIFIABLE",
                 "product ID 大小写",
-                "所有 product ID 全小写",
+                "已解析的静态 product ID 全小写",
                 "没有可解析的 product ID",
                 "检查远端配置、混淆字符串或 App Store Connect 商品 ID。",
             )
@@ -1157,7 +1154,7 @@ class Auditor:
         return result
 
     def _product_evidence(self) -> list[dict[str, Any]]:
-        result: list[dict[str, Any]] = list(self.dynamic_code_products)
+        result: list[dict[str, Any]] = []
         for record in self.iap_records[:5]:
             result.append({"path": self.rel(record.path), "line": 1, "excerpt": "检测到 IAP 商品配置"})
         for product in self.code_products[:5]:

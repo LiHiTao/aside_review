@@ -147,7 +147,7 @@ class ProductInitializerRegressionTests(unittest.TestCase):
                      'purchase(productID: product.id + suffix)']:
             auditor, checks = self.scan(catalog + 'ForEach(catalog) { product in ' + body + ' }')
             self.assertTrue(auditor.dynamic_code_products, body)
-            self.assertEqual(checks['IAP-002']['status'], 'NOT_VERIFIABLE')
+            self.assertEqual(checks['IAP-002']['status'], 'PASS')
         for prefix in ['let catalog = remote\n', '']:
             source = catalog + 'func other() { ' + prefix + 'ForEach(remoteCatalog) { product in purchase(productID: product.id) } }'
             auditor, _ = self.scan(source)
@@ -160,11 +160,11 @@ class ProductInitializerRegressionTests(unittest.TestCase):
         ForEach(catalog) { product in purchase(productID: product.id) }''')
         self.assertTrue(auditor.dynamic_code_products)
 
-    def test_partial_dynamic_catalogue_stays_unknown(self):
+    def test_partial_dynamic_catalogue_compares_only_static_ids(self):
         auditor, checks = self.scan('''let catalog: [StoreProduct] = [.init(id: "com.huvex.memos1"), .init(id: remote)]
         ForEach(catalog) { product in purchase(productID: product.id) }''')
         self.assertEqual(len(auditor.dynamic_code_products), 2)
-        self.assertEqual(checks['IAP-002']['status'], 'NOT_VERIFIABLE')
+        self.assertEqual(checks['IAP-002']['status'], 'PASS')
 
     def test_typed_transaction_read_is_not_new_product_but_purchase_is(self):
         source = 'func completed(transaction: SKPaymentTransaction) { let productID = transaction.payment.productIdentifier }'
@@ -241,3 +241,47 @@ class ProductInitializerRegressionTests(unittest.TestCase):
         auditor, _ = self.scan('''let catalog = [StoreProduct(id: "com.huvex.memos1", child: StoreProduct(productID: "com.huvex.memos1"))]
         ForEach(catalog) { product in purchase(productID: product.productID) }''')
         self.assertTrue(auditor.dynamic_code_products)
+
+
+class StaticProductCheckTests(unittest.TestCase):
+    scan = ProductIdentityTests.scan
+
+    def test_unknown_references_do_not_downgrade_static_match_or_leak_evidence(self):
+        auditor, checks = self.scan('''StoreProduct(productID: "com.huvex.memos1")
+        lookup(productID: transaction.productID)
+        purchase(productID: remoteID)''')
+        self.assertTrue(auditor.dynamic_code_products)
+        for rule in ['IAP-002', 'IAP-006']:
+            self.assertEqual(checks[rule]['status'], 'PASS')
+            self.assertFalse(checks[rule].get('manual_check'))
+        for check in checks.values():
+            self.assertNotIn('动态商品', json.dumps(check, ensure_ascii=False))
+            for evidence in check.get('evidence', []):
+                self.assertNotIn(evidence, auditor.dynamic_code_products)
+
+    def test_static_missing_ids_on_either_side_fail_despite_unknown_reference(self):
+        for code_ids, json_ids in [
+            (['com.huvex.memos1'], ['com.huvex.memos1', 'com.extra.pack']),
+            (['com.huvex.memos1', 'com.extra.pack'], ['com.huvex.memos1']),
+        ]:
+            with self.subTest(code_ids=code_ids, json_ids=json_ids):
+                source = '\n'.join(f'StoreProduct(productID: "{pid}")' for pid in code_ids)
+                auditor, checks = self.scan(source + '\npurchase(productID: remoteID)', [(pid, '0.99') for pid in json_ids])
+                self.assertTrue(auditor.dynamic_code_products)
+                self.assertEqual(checks['IAP-002']['status'], 'FAIL')
+
+    def test_no_static_code_evidence_remains_unverifiable(self):
+        auditor, checks = self.scan('purchase(productID: remoteID)')
+        self.assertEqual(auditor.code_products, [])
+        self.assertEqual(checks['IAP-002']['status'], 'NOT_VERIFIABLE')
+        self.assertEqual(checks['IAP-006']['status'], 'PASS')
+
+    def test_uppercase_static_id_fails_despite_unknown_reference(self):
+        _, checks = self.scan('StoreProduct(productID: "com.example.Pack")\npurchase(productID: remoteID)', [('com.example.Pack', '0.99')])
+        self.assertEqual(checks['IAP-002']['status'], 'PASS')
+        self.assertEqual(checks['IAP-006']['status'], 'FAIL')
+
+    def test_static_price_mismatch_fails_despite_unknown_reference(self):
+        _, checks = self.scan('StoreProduct(productID: "com.huvex.memos1", price: "$2.99")\npurchase(productID: remoteID)')
+        self.assertEqual(checks['IAP-002']['status'], 'FAIL')
+        self.assertIn('价格不一致 1 项', checks['IAP-002']['actual'])

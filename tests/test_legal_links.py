@@ -835,6 +835,87 @@ class LegalLinksTests(unittest.TestCase):
         self.assertEqual(3, sum(r['kind'] == 'privacy' for r in result))
         self.assertEqual(3, sum(r['kind'] == 'terms' for r in result))
 
+    def selector_factory_fixture(self, use=None):
+        return """
+        class Settings: UIViewController {
+          func viewDidLoad() {
+            USE
+          }
+          func rowButton(_ title: String, action: Selector) -> UIButton {
+            let button = UIButton(type: .system)
+            button.setTitle(title, for: .normal)
+            button.addTarget(self, action: action, for: .touchUpInside)
+            return
+              button
+          }
+          @objc func privacy() { present(SauceWashLegalPane(url: dynamicURL, heading: "Privacy Policy"), animated: true) }
+          @objc func terms() { present(SauceWashLegalPane(url: dynamicURL, heading: "Terms of Service"), animated: true) }
+        }
+        """.replace('USE', use if use is not None else '''
+            let privacyButton = rowButton("Privacy Policy", action: #selector(privacy))
+            let termsButton = rowButton("Terms of Service", action: #selector(terms))
+            stack.addArrangedSubview(privacyButton)
+            stack.addArrangedSubview(termsButton)
+        ''')
+
+    def test_selector_factory_local_buttons_and_newline_return(self):
+        result = self.scan(self.selector_factory_fixture(), {'Pane.swift': LEGAL_PANE})
+        self.assertEqual(2, len(result))
+        self.assertEqual(['PASS', 'PASS'], [r['status'] for r in result])
+
+    def test_selector_factory_inline_and_self_selector(self):
+        result = self.privacy(self.selector_factory_fixture('view.addSubview(self.rowButton("Privacy Policy", action: #selector(self.privacy)))'), {'Pane.swift': LEGAL_PANE})
+        self.assertEqual('PASS', result['status'])
+
+    def test_selector_factory_unknown_action_or_wrong_target(self):
+        original = self.selector_factory_fixture()
+        for fixture in (original.replace('#selector(privacy)', 'remoteSelector'),
+                        original.replace('addTarget(self,', 'addTarget(other,')):
+            with self.subTest(fixture=fixture):
+                self.assertEqual('NOT_VERIFIABLE', self.privacy(fixture, {'Pane.swift': LEGAL_PANE})['status'])
+
+    def test_selector_factory_reassigned_button_not_passed(self):
+        fixture = self.selector_factory_fixture().replace('stack.addArrangedSubview(privacyButton)', 'privacyButton = UIButton()\n stack.addArrangedSubview(privacyButton)')
+        self.assertEqual('NOT_VERIFIABLE', self.privacy(fixture, {'Pane.swift': LEGAL_PANE})['status'])
+
+    def test_selector_factory_unused_and_shadowed_button_not_evidence(self):
+        for use in ('let unused = rowButton("Privacy Policy", action: #selector(privacy))',
+                    'let b = rowButton("Privacy Policy", action: #selector(privacy))\n if ready { let b = UIButton()\n stack.addArrangedSubview(b) }',
+                    'let unused = { stack.addArrangedSubview(rowButton("Privacy Policy", action: #selector(privacy))) }'):
+            result = self.privacy(self.selector_factory_fixture(use), {'Pane.swift': LEGAL_PANE})
+            self.assertNotEqual('PASS', result['status'])
+
+    def test_selector_factory_external_entry_not_hidden(self):
+        fixture = self.selector_factory_fixture().replace('let termsButton', 'view.addSubview(rowButton("Privacy Policy", action: #selector(external)))\n let termsButton')
+        fixture = fixture.replace('@objc func terms()', '@objc func external() { UIApplication.shared.open(remoteURL) }\n @objc func terms()')
+        privacy = [r for r in self.scan(fixture, {'Pane.swift': LEGAL_PANE}) if r['kind'] == 'privacy']
+        self.assertEqual(['PASS', 'FAIL'], [r['status'] for r in privacy])
+
+    def test_selector_factory_same_name_other_owner_does_not_lend(self):
+        fixture = self.selector_factory_fixture().replace('addTarget(self,', 'addTarget(other,')
+        fixture += self.selector_factory_fixture().replace('class Settings:', 'class Other:')
+        privacy = [r for r in self.scan(fixture, {'Pane.swift': LEGAL_PANE}) if r['kind'] == 'privacy']
+        self.assertEqual(['NOT_VERIFIABLE', 'PASS'], [r['status'] for r in privacy])
+
+    def test_selector_factory_changed_return_or_other_button_not_passed(self):
+        original = self.selector_factory_fixture()
+        for fixture in (original.replace('return\n              button', 'button = UIButton()\n return button'),
+                        original.replace('button.addTarget', 'otherButton.addTarget')):
+            self.assertNotEqual('PASS', self.privacy(fixture, {'Pane.swift': LEGAL_PANE})['status'])
+
+    def test_selector_factory_shadowed_or_reassigned_parameters_not_passed(self):
+        original = self.selector_factory_fixture()
+        original = original.replace('@objc func terms()', '@objc func external() { UIApplication.shared.open(remoteURL) }\n @objc func terms()')
+        for statement in ('let action = #selector(external)', 'action = #selector(external)', 'let title = "Help"', 'title = "Help"'):
+            fixture = original.replace('button.setTitle', statement + '\n button.setTitle')
+            with self.subTest(statement=statement):
+                self.assertEqual('NOT_VERIFIABLE', self.privacy(fixture, {'Pane.swift': LEGAL_PANE})['status'])
+
+    def test_wk_delegate_without_loading_is_not_evidence(self):
+        pane = LEGAL_PANE.replace('web.load(URLRequest(url: url))', 'web.navigationDelegate = self')
+        result = self.privacy(self.selector_factory_fixture(), {'Pane.swift': pane})
+        self.assertEqual('NOT_VERIFIABLE', result['status'])
+
     def test_factory_identifier_dispatch_does_not_borrow_neighbor_case(self):
         fixture = dict(SOURCES)
         fixture['Locker.swift'] = fixture['Locker.swift'].replace('makeLink("Privacy Policy", id: "privacy")', 'makeLink("Privacy Policy", id: "unmapped")')

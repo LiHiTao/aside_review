@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.0.11`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.1.0`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -89,25 +89,27 @@ python3 scripts/audit_ios_a_side.py ./path/to/project \
 
 商店元数据购买用途（META-001）仅检查是否存在非空应用描述文案：有应用描述即 `PASS`，不要求文案说明内购方式、积分用途或付费操作，也不以是否存在内购作为触发条件。明确提供但为空的应用描述为 `FAIL`；描述文件缺失或无法识别为 `NOT_VERIFIABLE`。应用描述与内购商品 description、审核备注、README、隐私政策或用户协议应区分，后者不能替代应用描述。
 
-同一商品记录同时存在通用 `id` 和显式 `productId` / `productID` / `product_id` 时，仅显式字段作为商品身份，不能把档位序号重复计入商品数量。例如 `MemoProductTier(id: "1", productId: "com.huvex.memos1", ...)` 只代表一个商品；不要求把 `id` 改名或改变类型名称。该优先关系仅适用于同一记录，不能抑制相邻记录的真实商品。显式商品 ID 为动态表达式时保留无法静态确认，不回退到该记录的档位 `id`。注释、字符串和嵌套对象中的同名字段不作为外层记录的身份字段。
+同一商品记录同时存在通用 `id` 和显式 `productId` / `productID` / `product_id` 时，仅显式字段作为商品身份，不能把档位序号重复计入商品数量。例如 `MemoProductTier(id: "1", productId: "com.huvex.memos1", ...)` 只代表一个商品；不要求把 `id` 改名或改变类型名称。该优先关系仅适用于同一记录，不能抑制相邻记录的真实商品。显式商品 ID 为动态表达式时不纳入静态 ID 集合，也不回退到该记录的档位 `id`。注释、字符串和嵌套对象中的同名字段不作为外层记录的身份字段。
 
-商品初始化调用支持 `.init(...)`、`Type.init(...)` 和 `Type(...)`，与真正的 `init` 方法声明区分；简写初始化可从直接所属的显式类型数组推断商品类型。商品引用仅在能关联到完整静态目录时沿用定义证据，交易结果读取与商品定义分开处理；无法关联的动态购买来源仍需复核，不以已有静态商品覆盖未知来源。
+商品初始化调用支持 `.init(...)`、`Type.init(...)` 和 `Type(...)`，与真正的 `init` 方法声明区分；简写初始化可从直接所属的显式类型数组推断商品类型。商品引用仅在能关联到完整静态目录时沿用定义证据，交易结果读取与商品定义分开处理；动态商品 ID 不参与一致性和大小写检查，也不单独触发需复核。
 
-商品 ID 必须有商品语义证据；不得仅因普通 `id` 含点号、价格字样或类似商品的命名就计入内购。通知、任务、路由等业务 ID 不参与商品数量、一致性和大小写统计。Swift 字符串插值或拼接不能截取为商品字面量；确属动态内购但无法解析时保留 `NOT_VERIFIABLE`。具体识别边界见规则参考。
+商品 ID 必须有商品语义证据；不得仅因普通 `id` 含点号、价格字样或类似商品的命名就计入内购。通知、任务、路由等业务 ID 不参与商品数量、一致性和大小写统计。Swift 字符串插值或拼接不能截取为商品字面量；无法解析的动态 ID 不参与本项静态对比，不截取或猜测其值。具体识别边界见规则参考。
 
 IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或非布尔值时判定 `FAIL`；字段缺失时判定 `NOT_VERIFIABLE`，不得把缺少提交证据自动视为通过。
 
 ## 协议端内打开方式（LEGAL-001）
 
-固定检查隐私协议（Privacy Policy）和用户协议（Terms of Service / Terms of Use / User Agreement）。通过标准仅为：两类协议的入口关联页面或共用封装中存在 WKWebView 加载调用。
+固定检查隐私协议（Privacy Policy）和用户协议（Terms of Service / Terms of Use / User Agreement）。通过标准仅为：两类协议各自关联的页面或共用封装中，存在 WKWebView 初始化或明确类型声明，并存在对该 WebView 的加载调用。代理仅作为辅助证据，不要求设置 navigationDelegate 或 uiDelegate。
 
 - 按“入口 → 事件处理 → 页面／共用封装 → 加载方法”做轻量源码关联，支持 Swift / SwiftUI、UIKit、Objective-C（含 `.m` / `.mm`）、导航控制器包装及跨方法调用。仅导入 WebKit、创建 WKWebView、出现协议字样或无关页面中的 WebView 不足以通过；注释、说明字符串和未调用的辅助函数不作为加载实现证据。
 - UIViewRepresentable 的 `context.coordinator` 调用可通过 `makeCoordinator` 的构造或明确返回类型关联到实际 Coordinator 方法，并传递 WKWebView 参数；仅声明而未调用的辅助方法、其它封装中的同名 Coordinator 不作为证据。
 - 关联到 WKWebView 的 `load` / `loadRequest` / `loadHTMLString` / `loadFileURL` 调用均属于加载实现。URL 为动态参数不影响通过；不再要求 URL 字面量解析、完整控制流证明、所有分支覆盖或 WebView 实例挂载证明。条件、Close 按钮、布局和进度提示不因其存在而降级。
 - 明确关联到外部浏览器或 `SFSafariViewController` 的协议入口仍为 `FAIL`；多个入口分别记录，正常 WKWebView 入口不能掩盖其它外跳入口。SwiftUI Link/openURL 按关联处理链判断，不仅凭关键词。
 - SwiftUI NavigationLink / Button 的 label 闭包支持自定义组件的 `title` 参数（例如 `MenuRow(title: "Privacy Policy")`），组件无需自带 action；入口仍关联外层导航或按钮的 destination/action，不借用相邻组件或目标页面中的标题。
+- 自定义 UIKit 按钮工厂可将标题及 Selector 参数转发到返回控件，支持直接加入视图或赋给局部变量后加入；不要求工厂名称大写，标题、目标、事件及返回控件必须关联，歧义或重赋值保留需复核。
 - 支持普通按钮、UITableView 行选择，以及按钮工厂生成控件并通过标识分发的共用事件。标题、section/row、控件标识及事件需对应，不借用其它行或其它控件的加载调用。
 - `Terms & Support` / `Terms and Support` 为用户协议名称。普通 Support 可通过传入页面的标题参数和页面标题赋值关联到用户协议；不因同一方法中存在无关条件而丢弃该证据，普通帮助页仍不作为协议证据。
+- 已识别协议入口但只有 WebView 初始化或代理、没有关联加载调用时为 `NOT_VERIFIABLE`。
 - 确认缺少必要协议入口为 `FAIL`；发现协议候选但无法关联页面或加载调用、源码读取不完整时为 `NOT_VERIFIABLE`，报告具体缺失的关联证据。
 
 不请求协议 URL，不检查部署、DNS、HTTP 状态、重定向、正文或真机效果。`PASS` 仅表示存在协议关联的 WKWebView 加载实现，不表示所有运行时路径均已验证。技能的 GitHub 自动更新检查独立保留。
@@ -185,4 +187,5 @@ Markdown 展示四态汇总、完整检查清单以及每项的期望、实际�
 
 不得对目标项目运行格式化器、代码生成、迁移、Xcode 自动修复或写入报告。协议检查不发起网络请求，不验证页面部署。扫描器只读取文件，并把报告写到项目外临时目录或用户明确指定的外部目录。
 
-引用解析边界：静态目录引用目前支持直接、完整且不可变的静态数组对应的唯一 `ForEach` 元素字段；数组后的 map、排序、拼接等变换不据此推定完整目录；交易结果只对有明确 `SKPaymentTransaction` 类型证据的直接读取赋值排除新增商品判定。跨方法传递、未知用途或其它未证明关联的引用继续需复核，不能仅凭 recordPurchase 等方法名称放行。
+
+内购一致性及大小写仅检查已解析的静态商品 ID；不因未知动态引用降级，不输出动态 ID 警告。两侧静态 ID 有缺项或可解析价格冲突仍失败；任一侧完全缺少静态商品证据时一致性仍需复核。静态检查通过不表示已验证运行时商品全集。

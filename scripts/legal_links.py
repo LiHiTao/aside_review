@@ -1051,6 +1051,7 @@ class Analyzer:
                 self._entry_result(kind, s, i, results, fallback_url)
             self._uikit(s)
             self._table_entries(s)
+            self._selector_factory_entries(s)
             self._factory_entries(s)
             self._fallback_candidates(s)
         for kind, title in (("privacy", "隐私协议"), ("terms", "用户协议")):
@@ -1221,6 +1222,123 @@ class Analyzer:
                                 results += self.trace(ss, start, ss.pairs[k + 1] + 1)
                     self._entry_result(kind, s, label_index, results)
 
+    def _factory_use(self, s, index):
+        """Return visible-use evidence and ambiguity for a local factory result."""
+        methods = [d for d in self.definitions if d.source is s and d.kind == "func"
+                   and d.begin <= index < d.end]
+        if len(methods) != 1:
+            return False, False
+        method = methods[0]
+        execution = set(_execution_indices(s, method.begin, method.end))
+        if index not in execution:
+            return False, False
+        close = s.pairs[index + 1]
+        if any(a < index < close < b and a in execution and a > 0
+               and s.tokens[a].text == "(" and s.tokens[a - 1].text in ("addSubview", "addArrangedSubview")
+               for a, b in s.pairs.items() if a < b):
+            return True, False
+        declarations = [c for c in self.constants if c[0] is s and c[4] <= index < c[5]
+                        and s.text(c[4], index) in ("", "self.") and c[5] == close + 1]
+        if len(declarations) != 1:
+            return False, False
+        _, name, _, declared, _, _ = declarations[0]
+        for k in sorted(execution):
+            if k <= close or s.tokens[k].text not in ("addSubview", "addArrangedSubview") or k + 1 not in s.pairs:
+                continue
+            arguments = _args(s, k + 2, s.pairs[k + 1])
+            if len(arguments) != 1 or s.text(*arguments[0][1:]) != name:
+                continue
+            if self._binding_key(s, k, name) != ("declaration", declared):
+                continue
+            reassigned = any(s.tokens[j].text == name and j + 1 < k and s.tokens[j + 1].text == "="
+                             and self._binding_key(s, j, name) == ("declaration", declared)
+                             for j in execution if close < j < k)
+            return True, reassigned
+        return False, False
+
+    def _selector_factory_entries(self, s):
+        """Bind title/Selector parameters of a returned and displayed UIButton."""
+        factories = [d for d in self.definitions if d.kind == "func" and "->UIButton" in d.source.text(d.start, d.begin)]
+        for factory in factories:
+            fs = factory.source
+            indices = list(_execution_indices(fs, factory.begin, factory.end))
+            returns = [k + 1 for k in indices if fs.tokens[k].text == "return" and k + 1 < factory.end]
+            if len(returns) != 1:
+                continue
+            returned = returns[0]
+            button = fs.tokens[returned].text
+            if _end_expr(fs, returned, factory.end) != returned + 1:
+                continue
+            binding = self._binding_key(fs, returned, button)
+            if binding[0] != "declaration":
+                continue
+            titles, actions = [], []
+            for k in indices:
+                if k + 1 not in fs.pairs or _simple_receiver(fs, k) != button or self._binding_key(fs, k, button) != binding:
+                    continue
+                arguments = _args(fs, k + 2, fs.pairs[k + 1])
+                if fs.tokens[k].text == "setTitle" and arguments:
+                    titles.append(arguments[0][1:])
+                if fs.tokens[k].text == "addTarget":
+                    target = next(((a, b) for label, a, b in arguments if label == "_"), None)
+                    action = next(((a, b) for label, a, b in arguments if label == "action"), None)
+                    if target and action:
+                        actions.append((target, action))
+            if len(titles) != 1 or len(actions) != 1:
+                continue
+            target_arg, action_arg = actions[0]
+            changed_return = any(fs.tokens[k].text == button and k + 1 < returned
+                                 and fs.tokens[k + 1].text == "=" and k != binding[1] + 1
+                                 and self._binding_key(fs, k, button) == binding
+                                 for k in indices if k < returned)
+            forwarded = fs.text(*action_arg)
+            parameter = next((label for label, name, typ in factory.params if name == forwarded and typ.rstrip("?!") == "Selector"), None)
+            if parameter is None:
+                continue  # Fixed selector + identifier dispatch is handled separately.
+            # A same-spelled local or assignment must not inherit the caller's
+            # title/Selector binding from the parameter environment.
+            parameter_bindings_valid = True
+            for expression in (titles[0], action_arg):
+                for _, name, _ in factory.params:
+                    references = [k for k in range(*expression) if fs.tokens[k].text == name]
+                    for reference in references:
+                        expected = ("parameter", factory.start, name)
+                        if self._binding_key(fs, reference, name) != expected:
+                            parameter_bindings_valid = False
+                        if any(fs.tokens[k].text == name and k + 1 < reference and fs.tokens[k + 1].text == "="
+                               and self._binding_key(fs, k, name) == expected
+                               for k in indices if k < reference):
+                            parameter_bindings_valid = False
+            for i in range(len(s.tokens) - 1):
+                if s.tokens[i].text != factory.name or s.tokens[i + 1].text != "(" or i + 1 not in s.pairs:
+                    continue
+                if self.enclosing_type(s, i) != self.enclosing_type(fs, factory.start):
+                    continue
+                if i and s.tokens[i - 1].text == "." and (i < 2 or s.tokens[i - 2].text != "self"):
+                    continue
+                visible, ambiguous = self._factory_use(s, i)
+                if not visible:
+                    continue
+                args = _args(s, i + 2, s.pairs[i + 1])
+                bound = self._bind(factory, {label: self.value(s, a, b) for label, a, b in args})
+                title = self.value(fs, *titles[0], bound).text
+                kind = self.label_kind(title) if title else None
+                if kind is None:
+                    continue
+                candidates = [d for d in factories if d.name == factory.name
+                              and self.enclosing_type(d.source, d.start) == self.enclosing_type(s, i)]
+                action = next((s.text(a, b) for label, a, b in args if label == parameter), "")
+                selector = re.fullmatch(r"#selector\((?:self\.)?(\w+)(?:\([^)]*\))?\)", action)
+                handlers = [d for d in self.definitions if selector and d.kind == "func" and d.name == selector[1]
+                            and self.enclosing_type(d.source, d.start) == self.enclosing_type(s, i)]
+                results = []
+                if parameter_bindings_valid and not ambiguous and not changed_return and len(candidates) == 1 and fs.text(*target_arg) == "self" and len(handlers) == 1:
+                    handler = handlers[0]
+                    results = self.trace(handler.source, handler.begin, handler.end)
+                else:
+                    results = [self.outcome("NOT_VERIFIABLE", "已发现协议按钮工厂入口，但返回控件重赋值、事件目标或 Selector 关联不明确。")]
+                self._entry_result(kind, s, i, results)
+
     def _factory_entries(self, s):
         """Resolve called UIButton factories and the corresponding identifier case.
 
@@ -1321,7 +1439,8 @@ def analyze_legal_links(root: Path, source_texts: Mapping[Path, str], all_texts:
     Recognises literal/unique Swift constants, enum raw values, direct SwiftUI
     navigation, scoped Link handlers, state-driven sheets, ordinary representable
     wrappers, UIKit target/actions, matched table sections/rows, and returned
-    UIButton factories with identifier dispatch. Explicit Info.plist lookups and
+    UIButton factories with identifier dispatch or forwarded Selector arguments.
+    Explicit Info.plist lookups and
     .strings/.xcstrings labels are resolved only when unique. Custom controls are
     retained as unknown candidates. Dynamic URL values do not block a found load
     call. Runtime config decoding, macros and general control-flow analysis are
