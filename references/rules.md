@@ -39,10 +39,22 @@
 | IAP-006 | product ID 大小写 | product ID 不是全小写。 |
 | IAP-007 | 档位价格顺序 | 商品列表原有价格顺序不是递增排列。默认从 0.99 起，依次为 2.99、9.99、19.99、49.99、99.99；额外档位按价格递增，自定义基线沿用策略。不要求名称或 ID 包含序号，缺少序号不影响通过。缺少可解析价格证据时为 `NOT_VERIFIABLE`。 |
 | IAP-008 | JSON 可解析性 | IAP 配置 JSON 无法解析；扫描器可用安全的尾逗号容错继续提取，但仍报告原文件无效。 |
+| IAP-010 | StoreKit 2 使用 | 任一明确 StoreKit 2 API 用法为 PASS，允许新旧混用；完整扫描仅有明确旧版购买实现为 FAIL；无足够证据为 NOT_VERIFIABLE。 |
 
 同一记录的显式商品字段优先于通用 `id`：`id: "1"` 与 `productId: "com.huvex.memos1"` 共存时只识别后者，避免七档被计为十四档。优先关系严格限制在同一记录，不借用相邻或嵌套记录的字段，不把注释和字符串当作字段；显式字段动态不可解析时不回退档位 `id`，不纳入静态集合。真实额外商品、大写 ID 和仅使用通用 `id` 的商品语义识别仍须保留。
 
-代码侧优先识别显式商品字段 `productID`/`productId`/`product_id`；通用 `id` 只有具备商品配置匹配或明确的局部商品上下文证据时才作为候选，不得只靠含点号、包含 `coin`/`pack` 等词或文件导入 StoreKit 判定。通知、任务和路由等业务 ID 不纳入商品统计；真正额外或含大写字母的商品仍须检查，不能仅白名单过滤 JSON 中已有的 ID。Swift 插值和拼接表达式不得截取成静态商品 ID，动态 ID 不参与静态一致性或大小写判定。JSON 侧识别 `iap_products`、`products`、`in_app_purchases` 等列表中的商品记录。静态检查不声称覆盖动态拼接、字符串混淆或运行时配置。IAP-001、002、003、005、006、007、008 在报告中合并成一个 `IAP-SUMMARY` finding，并作为固定子检查全部出现。
+代码侧优先识别显式商品字段 `productID`/`productId`/`product_id`；通用 `id` 只有具备商品配置匹配或明确的局部商品上下文证据时才作为候选，不得只靠含点号、包含 `coin`/`pack` 等词或文件导入 StoreKit 判定。通知、任务和路由等业务 ID 不纳入商品统计；真正额外或含大写字母的商品仍须检查，不能仅白名单过滤 JSON 中已有的 ID。Swift 插值和拼接表达式不得截取成静态商品 ID，动态 ID 不参与静态一致性或大小写判定。JSON 侧识别 `iap_products`、`products`、`in_app_purchases` 等列表中的商品记录。静态检查不声称覆盖动态拼接、字符串混淆或运行时配置。IAP-001、002、003、005、006、007、008、010 在报告中合并成一个 `IAP-SUMMARY` finding，并作为固定子检查全部出现。
+
+## StoreKit 2 使用（IAP-010）
+
+采用最简存在性检查，作为 IAP-SUMMARY 的固定子项，不增加顶层清单数量。识别任一明确 StoreKit 2 API 使用即 PASS，允许与旧版 StoreKit 混用；不追踪购买按钮、完整交易流程或方法可达性。
+
+- 通过证据：`Product.products(for:)` 调用，`Transaction.updates` / `currentEntitlements` / `unfinished` / `all` 访问，`Transaction.latest(for:)` 调用，明确为 StoreKit `Product` 对象的 `purchase` 调用，以及 `ProductView` / `StoreView` / `SubscriptionStoreView` 初始化。
+- 支持 `StoreKit.` 前缀、换行、空格和自定义封装内的代码。未限定模块名的 API 需有同文件 StoreKit 导入；本地同名类型或变量遮蔽不能作为证据。注释、字符串、普通 `.purchase()`、单独导入或类型声明、`.storekit` 配置和 `AppStore.sync()` 均不能单独通过。
+- 完整扫描仅有明确旧版购买实现（如 SKPaymentQueue 提交付款）且无 StoreKit 2 证据为 FAIL；没有明确实现、只有导入/配置、不可读取的第三方封装或扫描不完整且无通过证据时为 NOT_VERIFIABLE。
+- 支持 Swift / Objective-C 混合工程中的 Swift 实现，不要求 Objective-C 直接出现 StoreKit 2 API；不推断二进制框架内部版本。
+
+保留文件、行号及 API 摘录，子项参与现有内购汇总。PASS 仅确认存在 StoreKit 2 API 使用，不验证购买成功、发货或完整交易流程。保持 17 项顶层清单及 schema 2.0，无网络请求、构建或运行。
 
 ## A/B 冲突与购买入口
 

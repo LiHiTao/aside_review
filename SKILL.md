@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.1.1`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.1.2`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -97,6 +97,17 @@ python3 scripts/audit_ios_a_side.py ./path/to/project \
 
 IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或非布尔值时判定 `FAIL`；字段缺失时判定 `NOT_VERIFIABLE`，不得把缺少提交证据自动视为通过。
 
+## StoreKit 2 使用（IAP-010）
+
+采用最简存在性检查，作为 IAP-SUMMARY 的固定子项，不增加顶层清单数量。识别任一明确 StoreKit 2 API 使用即 PASS，允许与旧版 StoreKit 混用；不追踪购买按钮、完整交易流程或方法可达性。
+
+- 通过证据：`Product.products(for:)` 调用，`Transaction.updates` / `currentEntitlements` / `unfinished` / `all` 访问，`Transaction.latest(for:)` 调用，明确为 StoreKit `Product` 对象的 `purchase` 调用，以及 `ProductView` / `StoreView` / `SubscriptionStoreView` 初始化。
+- 支持 `StoreKit.` 前缀、换行、空格和自定义封装内的代码。未限定模块名的 API 需有同文件 StoreKit 导入；本地同名类型或变量遮蔽不能作为证据。注释、字符串、普通 `.purchase()`、单独导入或类型声明、`.storekit` 配置和 `AppStore.sync()` 均不能单独通过。
+- 完整扫描仅有明确旧版购买实现（如 SKPaymentQueue 提交付款）且无 StoreKit 2 证据为 FAIL；没有明确实现、只有导入/配置、不可读取的第三方封装或扫描不完整且无通过证据时为 NOT_VERIFIABLE。
+- 支持 Swift / Objective-C 混合工程中的 Swift 实现，不要求 Objective-C 直接出现 StoreKit 2 API；不推断二进制框架内部版本。
+
+保留文件、行号及 API 摘录，子项参与现有内购汇总。PASS 仅确认存在 StoreKit 2 API 使用，不验证购买成功、发货或完整交易流程。保持 17 项顶层清单及 schema 2.0，无网络请求、构建或运行。
+
 ## WKWebView 使用检查（LEGAL-001，简化标准）
 
 只检查工程源码中是否存在 WKWebView 初始化或明确类型声明，以及对该 WebView 的 `load` / `loadRequest` / `loadHTMLString` / `loadFileURL` 调用；存在即为 PASS。支持 Swift、SwiftUI 和 Objective-C（.m/.mm）。
@@ -161,7 +172,7 @@ PDF 完整清单显示状态、有效行数、文件数和门槛。内部证据�
 - `evidence`：相对项目根目录的路径、行号和摘录；不得输出绝对项目路径
 - `manual_check`：需要真机、App Store Connect 或人工确认时提供步骤
 
-Markdown 展示四态汇总、完整检查清单以及每项的期望、实际、证据与人工验证步骤。PDF 为控制篇幅，只展示报告标题和完整检查清单，不展示项目标识、规则版本、统计卡、状态说明、详细检查、聚合子检查、期望、证据或人工复核区块。完整清单仍必须包含规则表中的每个顶层检查项及其状态和结论。所有内购商品配置检查必须聚合为一个“内购项统一检查”结果，不得按商品逐条输出；IAP-001、002、003、005、006、007、008 仍在 JSON 与 Markdown 中作为固定子检查全部展示。PERM-001 聚合相机、相册、麦克风和 Push 的配置检查；PERM-002 检查相机、相册、麦克风用途文案，Push 不参与文案判定。ATT-001 与 ATT-002 独立展示，分别只检查配置和文案。
+Markdown 展示四态汇总、完整检查清单以及每项的期望、实际、证据与人工验证步骤。PDF 为控制篇幅，只展示报告标题和完整检查清单，不展示项目标识、规则版本、统计卡、状态说明、详细检查、聚合子检查、期望、证据或人工复核区块。完整清单仍必须包含规则表中的每个顶层检查项及其状态和结论。所有内购商品配置检查必须聚合为一个“内购项统一检查”结果，不得按商品逐条输出；IAP-001、002、003、005、006、007、008、010 仍在 JSON 与 Markdown 中作为固定子检查全部展示。PERM-001 聚合相机、相册、麦克风和 Push 的配置检查；PERM-002 检查相机、相册、麦克风用途文案，Push 不参与文案判定。ATT-001 与 ATT-002 独立展示，分别只检查配置和文案。
 
 不传 `--format` 时默认只输出 PDF；`--format pdf` 同样只输出 PDF。仅当用户明确要求时使用 `--format all` 输出三种格式，或 `--format both` 输出 Markdown 与 JSON，保留旧接口兼容。PDF 使用延迟加载的 ReportLab 和可嵌入中文字体；缺少依赖或字体时必须在写入报告前明确失败。优先使用 Codex bundled Python；其他环境可安装 `reportlab`，或通过 `IOS_ASIDE_REVIEW_PDF_FONT` 指定 TTF/TTC 字体。
 

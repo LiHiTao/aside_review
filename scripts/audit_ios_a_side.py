@@ -28,6 +28,7 @@ try:
     from .product_context import identity_fields
     from .product_references import ProductReferences, field_expression
     from .legal_links import analyze_webview_usage
+    from .storekit_usage import analyze_storekit_usage
 except ImportError:
     from update_skill import UpdateError, ensure_latest
     from restore_detection import detect_restore
@@ -36,6 +37,7 @@ except ImportError:
     from product_context import identity_fields
     from product_references import ProductReferences, field_expression
     from legal_links import analyze_webview_usage
+    from storekit_usage import analyze_storekit_usage
 
 
 DEFAULT_POLICY: dict[str, Any] = {
@@ -1126,12 +1128,16 @@ class Auditor:
                 "确认商品是否完全由代码、远端配置或 App Store Connect 提供。",
             )
 
-        check_order = {rule_id: index for index, rule_id in enumerate(("IAP-001", "IAP-002", "IAP-003", "IAP-005", "IAP-006", "IAP-007", "IAP-008"))}
+        storekit = analyze_storekit_usage(self.root, self.source_texts, scan_incomplete=self.source_scan_incomplete)
+        add_check("IAP-010", storekit["status"], "StoreKit 2 使用", "存在任一明确 StoreKit 2 API 使用，允许与旧版混用",
+                  storekit["actual"], evidence=storekit["evidence"],
+                  manual_check=None if storekit["status"] == "PASS" else "人工确认购买实现是否使用 StoreKit 2。")
+        check_order = {rule_id: index for index, rule_id in enumerate(("IAP-001", "IAP-002", "IAP-003", "IAP-005", "IAP-006", "IAP-007", "IAP-008", "IAP-010"))}
         checks.sort(key=lambda check: check_order[check["id"]])
         self.add_group(
             "IAP-SUMMARY",
             "内购项统一检查",
-            "统一检查价格档位、代码/JSON 一致性、提交审核、product ID、description、档位命名和 JSON 可解析性",
+            "统一检查价格档位、代码/JSON 一致性、提交审核、product ID、description、档位命名、JSON 可解析性和 StoreKit 2 使用",
             checks,
         )
 

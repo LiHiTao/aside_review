@@ -50,6 +50,7 @@ def write_fixture(root: Path, broken: bool = False) -> None:
         code_lines.append(f'        (id: "{product_id}", price: "${price}", coins: {amount}, title: "Coins {amount} Tier {tier}"),')
     code_lines.extend([
         "    ]",
+        '    func fetch() async throws { _ = try await Product.products(for: ["com.example.coins100"]) }',
         "    func requestTracking() { ATTrackingManager.requestTrackingAuthorization { _ in } }",
         "    func requestPermissions() {",
         "        _ = AVCaptureDevice.authorizationStatus(for: .video)",
@@ -501,7 +502,7 @@ class AuditTests(unittest.TestCase):
             iap = next(finding for finding in report["findings"] if finding["id"] == "IAP-SUMMARY")
             self.assertEqual(
                 [detail["id"] for detail in iap["details"]],
-                ["IAP-001", "IAP-002", "IAP-003", "IAP-005", "IAP-006", "IAP-007", "IAP-008"],
+                ["IAP-001", "IAP-002", "IAP-003", "IAP-005", "IAP-006", "IAP-007", "IAP-008", "IAP-010"],
             )
             permission = next(finding for finding in report["findings"] if finding["id"] == "PERM-001")
             self.assertEqual([detail["label"] for detail in permission["details"]], ["相机", "相册", "麦克风", "Push"])
