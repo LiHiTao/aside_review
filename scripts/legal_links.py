@@ -1,8 +1,7 @@
-"""Find WKWebView loading calls associated with legal-document UI entries.
+"""Static WKWebView usage checking without entry or control-flow requirements.
 
-Balanced source scopes associate an entry with its page or called helpers. URL
-literals, view mounting and complete runtime control flow are not prerequisites.
-Unrelated WebViews, prose and uncalled helper bodies do not supply evidence.
+The active audit uses analyze_webview_usage. analyze_legal_links and its parser
+remain as a legacy compatibility helper; they do not decide active LEGAL-001.
 No code is executed and no network request is made here.
 """
 from __future__ import annotations
@@ -1447,3 +1446,171 @@ def analyze_legal_links(root: Path, source_texts: Mapping[Path, str], all_texts:
     outside this check; document prose alone is never a user-interface entry.
     """
     return Analyzer(root, source_texts, all_texts, scan_incomplete).run()
+
+
+def analyze_webview_usage(root: Path, source_texts: Mapping[Path, str], *, scan_incomplete: bool = False) -> dict:
+    """Project-level static WK type/init + load evidence, without UI routing.
+
+    Scope resolution only keeps another object's ``load`` from borrowing a WK
+    declaration. No entry, delegate, reachability, URL or mounting proof is made.
+    """
+    analyzer = Analyzer(root, source_texts, {}, scan_incomplete)
+    bindings = []
+    wk_evidence = []
+    writes = []
+
+    def owner(s, index):
+        result = analyzer.owner(s, index)
+        if result is not None:
+            return result
+        # Objective-C properties commonly live in a separate header.
+        for i in range(index - 1, -1, -1):
+            if s.tokens[i].text == "@" and i + 2 < len(s.tokens):
+                if s.tokens[i + 1].text == "end":
+                    break
+                if s.tokens[i + 1].text in ("interface", "implementation"):
+                    return s.tokens[i + 2].text
+        return None
+
+    def add(s, name, index, typed=False, expression=None, scopes=None):
+        bindings.append((s, name, index, tuple(s.ancestors(index) if scopes is None else scopes),
+                         owner(s, index), typed, expression))
+
+    for s in analyzer.sources:
+        for i, token in enumerate(s.tokens):
+            if token.literal is not None:
+                continue
+            if token.text == "WKWebView":
+                wk_evidence.append(analyzer.evidence(s, i))
+            if token.text in ("let", "var") and i + 1 < len(s.tokens):
+                end = _end_expr(s, i + 2, len(s.tokens))
+                eq = next((k for k in range(i + 2, end) if s.tokens[k].text == "="), None)
+                header_end = eq if eq is not None else end
+                typed = s.text(i + 2, header_end).rstrip("?!") in (":WKWebView", ":WebKit.WKWebView")
+                add(s, s.tokens[i + 1].text, i, typed, (eq + 1, end) if eq is not None else None)
+            if s.path.suffix != ".swift" and token.text == "*" and i and i + 1 < len(s.tokens):
+                # Local variables, ivars and @property declarations.
+                name_index = i + 1
+                if s.tokens[name_index].text in ("_Nullable", "_Nonnull", "__nullable", "__nonnull"):
+                    name_index += 1
+                if name_index < len(s.tokens) and re.fullmatch(r"[A-Za-z_]\w*", s.tokens[name_index].text):
+                    eq = name_index + 1
+                    expression = (eq + 1, _end_expr(s, eq + 1, len(s.tokens))) if eq < len(s.tokens) and s.tokens[eq].text == "=" else None
+                    add(s, s.tokens[name_index].text, i, s.tokens[i - 1].text == "WKWebView", expression)
+        if s.path.suffix == ".swift":
+            for opening, close in s.pairs.items():
+                if opening > close or s.tokens[opening].text != "{":
+                    continue
+                end = next((k for k in range(opening + 1, close) if s.tokens[k].text in ("in", "{", "}", ";")), None)
+                if end is None or s.tokens[end].text != "in":
+                    continue
+                begin = opening + 1
+                if begin in s.pairs and s.tokens[begin].text == "[":
+                    begin = s.pairs[begin] + 1
+                if begin < end and s.tokens[begin].text == "(" and begin in s.pairs:
+                    finish = s.pairs[begin]
+                    begin += 1
+                else:
+                    finish = end
+                for a, b in _split(s, begin, finish):
+                    if a < b and re.fullmatch(r"[A-Za-z_]\w*", s.tokens[a].text):
+                        typ = s.text(a + 1, b).rstrip("?!")
+                        add(s, s.tokens[a].text, a, typ in (":WKWebView", ":WebKit.WKWebView"))
+        else:
+            for i in range(len(s.tokens) - 3):
+                if s.tokens[i].text == "id" and s.tokens[i + 2].text == "=":
+                    add(s, s.tokens[i + 1].text, i, expression=(i + 3, _end_expr(s, i + 3, len(s.tokens))))
+        for d in analyzer.definitions:
+            if d.source is not s or d.kind != "func":
+                continue
+            scopes = [d.begin - 1, *s.ancestors(d.start)]
+            for _, name, typ in d.params:
+                add(s, name, d.start, typ.rstrip("?!") in ("WKWebView", "WebKit.WKWebView"), scopes=scopes)
+            if s.path.suffix != ".swift":
+                for i in range(d.start, d.begin - 3):
+                    if s.tokens[i].text == ":" and s.tokens[i + 1].text == "(" and i + 1 in s.pairs:
+                        close = s.pairs[i + 1]
+                        if close + 1 < d.begin:
+                            add(s, s.tokens[close + 1].text, d.start,
+                                s.text(i + 2, close).replace("*", "") in ("WKWebView", "WKWebView_Nullable", "WKWebView_Nonnull"), scopes=scopes)
+
+    for s in analyzer.sources:
+        declarations = {binding[2] + 1 for binding in bindings if binding[0] is s}
+        for i in range(len(s.tokens) - 2):
+            if i in declarations or not re.fullmatch(r"[A-Za-z_]\w*", s.tokens[i].text):
+                continue
+            if s.tokens[i + 1].text == "=" and s.tokens[i + 2].text != "=":
+                writes.append((s, s.tokens[i].text, i, tuple(s.ancestors(i)),
+                               (i + 2, _end_expr(s, i + 2, len(s.tokens)))))
+
+    def resolve(s, a, b, seen=frozenset()):
+        text = s.text(a, b).rstrip("?!")
+        # Explicit constructions, including ObjC alloc/init expressions.
+        if re.match(r"^(?:WebKit\.)?WKWebView\(", text) or analyzer.value(s, a, b).type_name in ("WKWebView", "WebKit.WKWebView") and not re.fullmatch(r"(?:self\.)?\w+", text):
+            return [analyzer.evidence(s, a)]
+        is_member = text.startswith("self.")
+        name = text.removeprefix("self.")
+        if not re.fullmatch(r"[A-Za-z_]\w*", name):
+            return []
+        scopes = s.ancestors(a)
+        visible = [binding for binding in bindings if binding[0] is s and binding[1] == name
+                   and binding[2] <= a and all(scope in scopes for scope in binding[3])]
+        if is_member:
+            visible = [binding for binding in visible if not any(d.source is s and d.kind == "func" and d.begin - 1 in binding[3] for d in analyzer.definitions)]
+        if visible:
+            depth = max(len(binding[3]) for binding in visible)
+            visible = [binding for binding in visible if len(binding[3]) == depth]
+            visible = [max(visible, key=lambda binding: binding[2])]
+        else:
+            current_owner = owner(s, a)
+            visible = [binding for binding in bindings if binding[1] in (name, name[1:] if name.startswith("_") else name)
+                       and binding[4] == current_owner and not any(d.source is binding[0] and d.kind == "func" and d.begin - 1 in binding[3] for d in analyzer.definitions)]
+        if len(visible) != 1:
+            return []
+        bs, _, index, _, _, typed, expression = visible[0]
+        key = (bs.path, index, name)
+        if key in seen:
+            return []
+        if typed:
+            return [analyzer.evidence(bs, index)]
+        updates = [write for write in writes if write[0] is s and write[1] == name
+                   and bs is s and index < write[2] < a and all(scope in scopes for scope in write[3])
+                   and len(write[3]) >= len(visible[0][3])]
+        if updates:
+            update = max(updates, key=lambda item: item[2])
+            return resolve(s, *update[4], seen | {key})
+        return resolve(bs, *expression, seen | {key}) if expression else []
+
+    evidence = []
+    for s in analyzer.sources:
+        for i, token in enumerate(s.tokens):
+            if token.literal is not None:
+                continue
+            if s.path.suffix == ".swift" and token.text in ("load", "loadRequest", "loadHTMLString", "loadFileURL") and i + 1 in s.pairs and s.tokens[i + 1].text == "(" and i >= 2 and s.tokens[i - 1].text == ".":
+                end = i - 1
+                start = end - 1
+                while start >= 0 and s.tokens[start].text in ("?", "!"):
+                    start -= 1
+                if start in s.pairs and s.tokens[start].text == ")":
+                    start = s.pairs[start] - 1
+                if start >= 2 and s.tokens[start - 1].text == ".":
+                    start -= 2
+                found = resolve(s, start, end) if start >= 0 else []
+            elif s.path.suffix != ".swift" and token.text == "[" and i in s.pairs:
+                call = _objc_call(s, i, s.pairs[i] + 1)
+                found = resolve(s, *call[1]) if call and call[0] in ("loadRequest", "loadHTMLString", "loadFileURL") else []
+            else:
+                continue
+            if found:
+                evidence += found + [analyzer.evidence(s, i)]
+    unique = list({(item["path"], item["line"]): item for item in evidence}.values())
+    if unique:
+        status, actual = "PASS", "源码中存在 WKWebView 初始化或明确类型，以及对应实例的加载调用；仅验证静态实现存在，不验证协议入口或运行效果。"
+    elif wk_evidence:
+        status, actual = "NOT_VERIFIABLE", "发现 WKWebView，但尚未识别对应实例的加载调用。"
+    elif analyzer.incomplete:
+        status, actual = "NOT_VERIFIABLE", "源码扫描不完整，无法确认 WKWebView 加载实现是否存在。"
+    else:
+        status, actual = "FAIL", "完整源码扫描未发现 WKWebView 加载实现。"
+    return {"status": status, "actual": actual, "evidence": unique or wk_evidence[:8],
+            "manual_check": "检查 WKWebView 类型或初始化与其加载调用。" if status == "NOT_VERIFIABLE" else None}

@@ -1,6 +1,6 @@
 ---
 name: ios-aside-review
-description: 对目录结构不固定的 iOS A 面项目执行只读上架风险审计。检查隐私协议/用户协议的应用内 WKWebView 打开方式、A 面有效代码是否超过 5000 行、StoreKit 内购与 JSON 配置、B 面通知代理冲突、restore 功能、PrivacyInfo.xcprivacy、相机/相册/麦克风/推送/ATT 的 API 使用及 Xcode 配置、敏感词（AI、Dating、赌博、色情等）、第三方 AI 数据共享、App Store 元数据、LaunchScreen.storyboard 和 4–7 个英文字母的 App 名称。用户要求检查、审计、拒审排查、上架前验证，或明确使用 $ios-aside-review 时触发；不得修改目标项目代码或配置。
+description: 对目录结构不固定的 iOS A 面项目执行只读上架风险审计。按简化标准检查工程 WKWebView 初始化/类型与加载调用、A 面有效代码是否超过 5000 行、StoreKit 内购与 JSON 配置、B 面通知代理冲突、restore 功能、PrivacyInfo.xcprivacy、相机/相册/麦克风/推送/ATT 的 API 使用及 Xcode 配置、敏感词（AI、Dating、赌博、色情等）、第三方 AI 数据共享、App Store 元数据、LaunchScreen.storyboard 和 4–7 个英文字母的 App 名称。用户要求检查、审计、拒审排查、上架前验证，或明确使用 $ios-aside-review 时触发；不得修改目标项目代码或配置。
 ---
 
 # iOS A 面审核检查
@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.1.0`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.1.1`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -97,24 +97,17 @@ python3 scripts/audit_ios_a_side.py ./path/to/project \
 
 IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或非布尔值时判定 `FAIL`；字段缺失时判定 `NOT_VERIFIABLE`，不得把缺少提交证据自动视为通过。
 
-## 协议端内打开方式（LEGAL-001）
+## WKWebView 使用检查（LEGAL-001，简化标准）
 
-固定检查隐私协议（Privacy Policy）和用户协议（Terms of Service / Terms of Use / User Agreement）。通过标准仅为：两类协议各自关联的页面或共用封装中，存在 WKWebView 初始化或明确类型声明，并存在对该 WebView 的加载调用。代理仅作为辅助证据，不要求设置 navigationDelegate 或 uiDelegate。
+只检查工程源码中是否存在 WKWebView 初始化或明确类型声明，以及对该 WebView 的 `load` / `loadRequest` / `loadHTMLString` / `loadFileURL` 调用；存在即为 PASS。支持 Swift、SwiftUI 和 Objective-C（.m/.mm）。
 
-- 按“入口 → 事件处理 → 页面／共用封装 → 加载方法”做轻量源码关联，支持 Swift / SwiftUI、UIKit、Objective-C（含 `.m` / `.mm`）、导航控制器包装及跨方法调用。仅导入 WebKit、创建 WKWebView、出现协议字样或无关页面中的 WebView 不足以通过；注释、说明字符串和未调用的辅助函数不作为加载实现证据。
-- UIViewRepresentable 的 `context.coordinator` 调用可通过 `makeCoordinator` 的构造或明确返回类型关联到实际 Coordinator 方法，并传递 WKWebView 参数；仅声明而未调用的辅助方法、其它封装中的同名 Coordinator 不作为证据。
-- 关联到 WKWebView 的 `load` / `loadRequest` / `loadHTMLString` / `loadFileURL` 调用均属于加载实现。URL 为动态参数不影响通过；不再要求 URL 字面量解析、完整控制流证明、所有分支覆盖或 WebView 实例挂载证明。条件、Close 按钮、布局和进度提示不因其存在而降级。
-- 明确关联到外部浏览器或 `SFSafariViewController` 的协议入口仍为 `FAIL`；多个入口分别记录，正常 WKWebView 入口不能掩盖其它外跳入口。SwiftUI Link/openURL 按关联处理链判断，不仅凭关键词。
-- SwiftUI NavigationLink / Button 的 label 闭包支持自定义组件的 `title` 参数（例如 `MenuRow(title: "Privacy Policy")`），组件无需自带 action；入口仍关联外层导航或按钮的 destination/action，不借用相邻组件或目标页面中的标题。
-- 自定义 UIKit 按钮工厂可将标题及 Selector 参数转发到返回控件，支持直接加入视图或赋给局部变量后加入；不要求工厂名称大写，标题、目标、事件及返回控件必须关联，歧义或重赋值保留需复核。
-- 支持普通按钮、UITableView 行选择，以及按钮工厂生成控件并通过标识分发的共用事件。标题、section/row、控件标识及事件需对应，不借用其它行或其它控件的加载调用。
-- `Terms & Support` / `Terms and Support` 为用户协议名称。普通 Support 可通过传入页面的标题参数和页面标题赋值关联到用户协议；不因同一方法中存在无关条件而丢弃该证据，普通帮助页仍不作为协议证据。
-- 已识别协议入口但只有 WebView 初始化或代理、没有关联加载调用时为 `NOT_VERIFIABLE`。
-- 确认缺少必要协议入口为 `FAIL`；发现协议候选但无法关联页面或加载调用、源码读取不完整时为 `NOT_VERIFIABLE`，报告具体缺失的关联证据。
+- 不识别按钮入口、协议标题，不追踪导航或协议页面关联，不要求隐私/用户协议各自存在入口。
+- 不要求代理、URL 字面量、视图挂载、方法被入口调用或完整控制流证明。
+- 注释、说明字符串以及其它类型对象上的同名 load 方法不作为 WKWebView 加载证据。
+- 完整扫描无 WKWebView 证据为 FAIL；有 WKWebView 但无法关联加载调用为 NOT_VERIFIABLE；读取不完整且缺少通过证据时为 NOT_VERIFIABLE。
+- 不再判断协议外跳、Safari 或多入口混用。工程任意页面的 WKWebView 加载均可满足本项。
 
-不请求协议 URL，不检查部署、DNS、HTTP 状态、重定向、正文或真机效果。`PASS` 仅表示存在协议关联的 WKWebView 加载实现，不表示所有运行时路径均已验证。技能的 GitHub 自动更新检查独立保留。
-
-PDF 仅保留 LEGAL-001，完整清单共 17 项。JSON/Markdown 按需保留两类协议各入口的源码位置、可解析 URL 和调用证据；动态 URL 可为空，不以此降级。继续使用 schema 2.0，不输出协议网络请求记录。目标工程保持只读，不构建或启动 App。
+不请求协议 URL，不检查部署或真机效果。PASS 仅证明工程存在 WKWebView 加载实现，不证明隐私协议、用户协议已接入，也不证明该方法实际执行。GitHub 更新检查独立保留。报告名称改为“WKWebView 使用（简化）”，保留 LEGAL-001、17 项清单及 schema 2.0，输出工程级证据，不伪造两类协议入口明细。
 
 ## A 面有效代码行数（CODE-001）
 

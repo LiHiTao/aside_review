@@ -27,7 +27,7 @@ try:
     from .code_lines import audit_code_lines
     from .product_context import identity_fields
     from .product_references import ProductReferences, field_expression
-    from .legal_links import analyze_legal_links
+    from .legal_links import analyze_webview_usage
 except ImportError:
     from update_skill import UpdateError, ensure_latest
     from restore_detection import detect_restore
@@ -35,7 +35,7 @@ except ImportError:
     from code_lines import audit_code_lines
     from product_context import identity_fields
     from product_references import ProductReferences, field_expression
-    from legal_links import analyze_legal_links
+    from legal_links import analyze_webview_usage
 
 
 DEFAULT_POLICY: dict[str, Any] = {
@@ -256,7 +256,7 @@ RULE_TITLES = {
     "PERM-002": "权限用途文案",
     "ATT-001": "ATT Xcode 配置",
     "ATT-002": "ATT 用途文案",
-    "LEGAL-001": "协议打开方式",
+    "LEGAL-001": "WKWebView 使用（简化）",
     "PRIV-001": "第三方 AI 数据共享",
     "META-001": "商店应用描述",
     "META-002": "免费与价格声明",
@@ -839,24 +839,17 @@ class Auditor:
         return self
 
     def check_legal_links(self) -> None:
-        entries = analyze_legal_links(
-            self.root, self.source_texts, self.all_texts,
-            scan_incomplete=self.source_scan_incomplete,
+        entry = analyze_webview_usage(
+            self.root, self.source_texts, scan_incomplete=self.source_scan_incomplete,
         )
-        route_details: list[dict[str, Any]] = []
-        for index, entry in enumerate(entries, 1):
-            label = "隐私协议" if entry["kind"] == "privacy" else "用户协议"
-            label += f" · 入口 {index}"
-            evidence = entry.get("evidence", [])
-            route_status = entry["status"]
-            route_details.append({
-                "id": "LEGAL-001", "label": label, "status": route_status,
-                "severity": "high" if route_status == "FAIL" else "info" if route_status == "PASS" else "medium",
-                "expected": "协议关联的页面或共用封装存在 WKWebView 加载调用",
-                "actual": entry["actual"], "evidence": evidence,
-                "manual_check": entry.get("manual_check"), "url": entry.get("url"),
-            })
-        self.add_group("LEGAL-001", "协议打开方式", "用户协议和隐私协议均通过端内 WKWebView 打开", route_details)
+        status = entry["status"]
+        expected = "工程中存在 WKWebView 初始化或明确类型及对应加载调用"
+        detail = {
+            "id": "LEGAL-001", "label": "工程 WKWebView 使用", "status": status,
+            "severity": "high" if status == "FAIL" else "info" if status == "PASS" else "medium",
+            "expected": expected, **entry,
+        }
+        self.add_group("LEGAL-001", "WKWebView 使用（简化）", expected, [detail])
 
     def check_code_lines(self) -> None:
         finding = audit_code_lines(self.root, self.policy)

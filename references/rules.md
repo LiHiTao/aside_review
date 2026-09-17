@@ -18,19 +18,15 @@
 
 默认工程或显式目录没有合格源码时为 0 行失败；同一文件不因重叠路径重复计数。无法按名称识别的 B 面、第三方和生成代码应通过排除路径指定，不根据代码内容猜测归属。PDF 仅显示聚合检查，JSON/Markdown 按需提供文件计数明细。
 
-## 协议端内打开方式
+## WKWebView 使用（简化）
 
 | ID | 检查 | 判定 |
 |---|---|---|
-| LEGAL-001 | 协议打开方式 | 两类协议入口关联的页面或共用封装中存在 WKWebView 加载调用为 PASS；明确外跳或缺少必要入口为 FAIL；候选入口无法关联页面／加载方法或源码不完整为 NOT_VERIFIABLE。 |
+| LEGAL-001 | WKWebView 使用（简化） | 工程存在 WKWebView 初始化/类型及对应加载调用为 PASS；无 WKWebView 为 FAIL；存在但无法关联加载为 NOT_VERIFIABLE；读取不完整且无通过证据时为 NOT_VERIFIABLE。 |
 
-仅检查协议关联的加载实现，不证明完整控制流、URL 字面量或 WebView 挂载状态。动态 URL 和页面中的普通条件分支不再单独导致需复核。WKWebView 的 load/loadRequest、loadHTMLString、loadFileURL 均可作为加载调用；仅创建实例、注释示例、未调用辅助函数或无关页面不能替代证据。
+只检查工程中 WKWebView 的初始化/明确类型及对应 load/loadRequest、loadHTMLString、loadFileURL 调用，支持 Swift/SwiftUI 和 Objective-C。不识别按钮、标题、协议入口或导航，不要求代理、URL 字面量、挂载、方法可达性或完整控制流。工程任意页面的真实加载实现均可满足本项，包括未关联入口的方法；注释、字符串示例和其它类型的同名方法不作为证据。
 
-入口追踪包括普通按钮、表格的 section/row 与选择事件、按钮工厂的标识与共用事件分发，以及导航控制器包装和跨方法调用。每个入口独立保留证据；明确关联外部浏览器或 Safari 的入口仍失败，不能用其它正常入口掩盖。
-
-Terms & Support / Terms and Support 作为用户协议标题；普通 Support 需通过页面参数及标题赋值关联到用户协议，不能全局等同于用户协议。标题关联不因同一方法出现无关 if 而整体失效。
-
-不请求协议 URL、不检查部署或运行效果；GitHub 自动版本检查独立保留。报告共 17 项，schema 2.0 不变，无 LEGAL-002 或协议网络请求记录。PASS 仅声明存在关联加载实现。
+不检查两类协议分别接入、外部浏览器、Safari、多入口混用或网络部署。PASS 仅证明工程存在 WKWebView 加载实现，不证明协议已接入或方法实际执行。报告保留 17 项、schema 2.0 与 LEGAL-001，使用工程级证据，不输出虚构的两类协议入口。无 LEGAL-002 或协议网络请求记录；GitHub 自动版本检查独立保留。
 
 ## 内购
 
@@ -125,21 +121,13 @@ META-003 必须复用 IAP-003 的状态和静态证据，避免同一商品提�
 - 默认仅生成 PDF；其它格式只在用户明确要求时使用。`--format pdf` 只生成 `ios-aside-review.pdf`；`--format all` 同时生成 Markdown、JSON 和 PDF；`--format both` 保留 Markdown + JSON。
 - PDF 缺少 ReportLab 或可嵌入中文字体时必须在写报告前失败，不留下损坏文件。
 
-### 1.0.9 入口兼容
+### 相册用途兼容
 
-SwiftUI 导航和按钮的 label 闭包可从自定义 Row 的 title 参数识别协议名称，action/destination 由外层控件提供。保留 Swift UIKit 与 Objective-C（.m/.mm）的事件、页面及 WKWebView 加载关联，不因自定义 Row 自身没有 action 而漏掉外层入口。相邻标题、注释和无关 WebView 不作为关联证据。
-
-### 1.0.10 兼容
-
-相册权限用途动作包含 export/exports/exported/exporting 和“导出”；英文新增动作使用完整词匹配，资源对象和长度门槛保持不变。协议检查沿实际调用关联 UIViewRepresentable 的 Coordinator 及其接收的 WKWebView 参数，不把未调用方法或其它页面的同名 Coordinator 作为证据；无法解析的动态关联仍需复核。
+相册权限用途动作包含 export/exports/exported/exporting 和“导出”；英文新增动作使用完整词匹配，资源对象和长度门槛保持不变。
 
 ### 1.0.11 商品识别
 
 初始化调用 `.init` / `Type.init` 不作为方法声明跳过。显式类型数组中的简写初始化可沿用元素类型的商品语义；显式 productID 优先规则仍局限同一记录。只有能够关联到完整静态目录的商品引用可消除对应动态不确定性，交易结果读取不当作新的商品定义；1.1.0 起不再因动态 ID 引用触发需复核。
 
-
-### 1.1.0 协议简化标准
-
-协议关联页面/共用封装中的 WKWebView 初始化或明确类型，加上对应加载调用即可通过，代理仅作辅助。不验证 URL 字面量、网络部署、视图挂载或完整运行时控制流；未调用辅助方法和无关 WebView 不能作为证据。UIKit 按钮工厂支持标题及 Selector 参数转发、局部变量后续加入视图，关联不明需复核，明确外跳失败。两类协议和各入口分别记录，保持 17 项清单及 schema 2.0。
 
 1.1.0 内购检查仅对已解析静态 ID 集合及可解析价格进行对比：任一静态缺项或价格冲突失败，一侧无静态证据则需复核；大小写仅统计已解析 ID。动态 ID 不产生额外检查状态、警告或人工复核提示。

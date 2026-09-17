@@ -54,7 +54,7 @@ class PolicyPage: UIViewController {
             report = Auditor(root).run().report()
             finding = next(f for f in report["findings"] if f["id"] == "LEGAL-001")
             self.assertEqual(finding["status"], "PASS", finding)
-            self.assertEqual(len(finding["details"]), 2)
+            self.assertEqual(len(finding["details"]), 1)
             self.assertEqual(len(report["findings"]), 17)
             self.assertEqual(report["schema_version"], "2.0")
             self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
@@ -108,8 +108,8 @@ struct LocalPage: UIViewRepresentable {
             report = Auditor(root).run().report()
             finding = next(f for f in report["findings"] if f["id"] == "LEGAL-001")
             self.assertEqual(finding["status"], "PASS", finding)
-            self.assertEqual(len(finding["details"]), 2, finding)
-            self.assertTrue(all(d["evidence"][0]["path"] == "Profile.swift" for d in finding["details"]))
+            self.assertEqual(len(finding["details"]), 1, finding)
+            self.assertTrue(all(d["evidence"][0]["path"] == "Document.swift" for d in finding["details"]))
             self.assertEqual(len(report["findings"]), 17)
             self.assertEqual(report["schema_version"], "2.0")
             self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
@@ -122,16 +122,12 @@ struct LocalPage: UIViewRepresentable {
             report = Auditor(root).run().report()
             finding = next(f for f in report["findings"] if f["id"] == "LEGAL-001")
             self.assertEqual(finding["status"], "PASS", finding)
-            self.assertEqual(len(finding["details"]), 6, finding)
-            for name in ("Gate.swift", "Profile.swift", "Locker.swift"):
-                entries = [d for d in finding["details"] if d["evidence"][0]["path"] == name]
-                self.assertEqual(len(entries), 2, (name, finding))
-                self.assertEqual(sum(d["label"].startswith("隐私协议") for d in entries), 1)
-                self.assertEqual(sum(d["label"].startswith("用户协议") for d in entries), 1)
+            self.assertEqual(len(finding["details"]), 1, finding)
+            self.assertEqual(finding["details"][0]["label"], "工程 WKWebView 使用")
             self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
             self.assertEqual(len(report["findings"]), 17)
 
-    def test_one_external_branch_cannot_be_hidden_by_other_entries(self):
+    def test_external_routes_are_outside_project_level_check(self):
         for name in ("Locker.swift", "Profile.swift"):
             with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -139,12 +135,8 @@ struct LocalPage: UIViewRepresentable {
                 p = root / name
                 p.write_text(p.read_text().replace('navigationController?.pushViewController(DocumentPane(url: Links.terms, heading: "Terms & Support"), animated: true)', 'present(SFSafariViewController(url: Links.terms), animated: true)'))
                 finding = next(f for f in Auditor(root).run().report()["findings"] if f["id"] == "LEGAL-001")
-                self.assertEqual(finding["status"], "FAIL", finding)
-                self.assertEqual(len(finding["details"]), 6, finding)
-                failed = [d for d in finding["details"] if d["status"] == "FAIL"]
-                self.assertEqual(len(failed), 1, finding)
-                self.assertTrue(failed[0]["label"].startswith("用户协议"))
-                self.assertEqual(failed[0]["evidence"][0]["path"], name)
+                self.assertEqual(finding["status"], "PASS", finding)
+                self.assertEqual(len(finding["details"]), 1, finding)
 
     def test_dynamic_addresses_keep_six_associated_loading_implementations(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -154,8 +146,8 @@ struct LocalPage: UIViewRepresentable {
             p.write_text(p.read_text().replace('URL(string: "https://not-deployed.invalid/privacy")!', 'RemoteConfig.privacyURL').replace('URL(string: "https://not-deployed.invalid/support")!', 'RemoteConfig.termsURL'))
             finding = next(f for f in Auditor(root).run().report()["findings"] if f["id"] == "LEGAL-001")
             self.assertEqual(finding["status"], "PASS", finding)
-            self.assertEqual(len(finding["details"]), 6, finding)
-            self.assertTrue(all(d["url"] is None for d in finding["details"]))
+            self.assertEqual(len(finding["details"]), 1, finding)
+            self.assertTrue(all("url" not in d for d in finding["details"]))
 
     def test_navigation_wrapped_protocols_are_checked_without_network(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -206,7 +198,7 @@ class LegalPane: UIViewController {
             findings = {f["id"]: f for f in Auditor(root).run().report()["findings"]}
             self.assertEqual(findings["LEGAL-001"]["status"], "PASS", findings["LEGAL-001"])
             self.assertNotIn("LEGAL-002", findings)
-            self.assertEqual({d["url"] for d in findings["LEGAL-001"]["details"]}, {"https://example.com/privacy", "https://example.com/terms"})
+            self.assertTrue(all("url" not in d for d in findings["LEGAL-001"]["details"]))
             self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
 
     def test_routes_schema_and_read_only_without_accessibility_metadata(self):
@@ -236,8 +228,8 @@ class LegalPane: UIViewController {
             report = Auditor(root).run().report()
             finding = next(f for f in report["findings"] if f["id"] == "LEGAL-001")
             self.assertEqual(finding["status"], "PASS", finding)
-            self.assertEqual(len(finding["details"]), 2)
-            self.assertEqual({d["url"] for d in finding["details"]}, {"https://example.com/legal#privacy", "https://example.com/legal#terms"})
+            self.assertEqual(len(finding["details"]), 1)
+            self.assertTrue(all("url" not in d for d in finding["details"]))
 
     def test_undeployed_urls_do_not_change_static_wkwebview_verdict(self):
         for hostname in ("not-deployed.invalid", "offline.example.invalid", "127.0.0.1:1"):
@@ -256,17 +248,14 @@ class LegalPane: UIViewController {
             self.assertEqual(findings["LEGAL-001"]["status"], "FAIL")
             self.assertNotIn("LEGAL-002", findings)
 
-    def test_any_bad_route_keeps_aggregate_failure(self):
-        entries = [
-            {"kind": "privacy", "status": "PASS", "actual": "WKWebView", "url": "https://example.com/privacy", "evidence": []},
-            {"kind": "privacy", "status": "FAIL", "actual": "外部浏览器", "url": "https://example.com/privacy", "evidence": []},
-            {"kind": "terms", "status": "PASS", "actual": "WKWebView", "url": "https://example.com/terms", "evidence": []},
-        ]
+    def test_one_project_detail_does_not_fabricate_legal_entries(self):
+        entry = {"status": "PASS", "actual": "WKWebView 加载实现存在", "evidence": []}
         with tempfile.TemporaryDirectory() as directory:
-            with patch("scripts.audit_ios_a_side.analyze_legal_links", return_value=entries):
+            with patch("scripts.audit_ios_a_side.analyze_webview_usage", return_value=entry):
                 findings = {f["id"]: f for f in Auditor(Path(directory)).run().report()["findings"]}
-            self.assertEqual(findings["LEGAL-001"]["status"], "FAIL")
-            self.assertEqual(len(findings["LEGAL-001"]["details"]), 3)
+            self.assertEqual(findings["LEGAL-001"]["status"], "PASS")
+            self.assertEqual(len(findings["LEGAL-001"]["details"]), 1)
+            self.assertEqual(findings["LEGAL-001"]["details"][0]["label"], "工程 WKWebView 使用")
             self.assertNotIn("LEGAL-002", findings)
 
     def test_source_decoding_errors_are_reported_to_legal_analyzer(self):
@@ -275,7 +264,7 @@ class LegalPane: UIViewController {
                 root = Path(directory)
                 (root / ("Bad" + suffix)).write_bytes(b"\xff\xfeinvalid utf8")
                 entry = {"kind": "privacy", "status": "NOT_VERIFIABLE", "actual": "源码不完整", "url": None, "evidence": []}
-                with patch("scripts.audit_ios_a_side.analyze_legal_links", return_value=[entry]) as analyzer:
+                with patch("scripts.audit_ios_a_side.analyze_webview_usage", return_value=entry) as analyzer:
                     Auditor(root).run()
                 self.assertTrue(analyzer.call_args.kwargs["scan_incomplete"])
 
