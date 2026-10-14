@@ -1,6 +1,6 @@
 ---
 name: ios-aside-review
-description: 对目录结构不固定的 iOS A 面项目执行只读上架风险审计。按简化标准检查工程 WKWebView 初始化/类型与加载调用、A 面有效代码是否超过 5000 行、StoreKit 内购与 JSON 配置、B 面通知代理冲突、restore 功能、PrivacyInfo.xcprivacy、相机/相册/麦克风/推送/ATT 的 API 使用及 Xcode 配置、敏感词（AI、Dating、赌博、色情等）、第三方 AI 数据共享、App Store 元数据、LaunchScreen.storyboard 和 4–7 个英文字母的 App 名称。用户要求检查、审计、拒审排查、上架前验证，或明确使用 $ios-aside-review 时触发；不得修改目标项目代码或配置。
+description: 对目录结构不固定的 iOS A 面项目执行只读上架风险审计。按简化标准检查工程 WKWebView 初始化/类型与加载调用、A 面有效代码是否超过 5000 行、疑似无用代码量、源码文件数是否超过 20、StoreKit 内购与 JSON 配置、B 面通知代理冲突、restore 功能、PrivacyInfo.xcprivacy、相机/相册/麦克风/推送/ATT 的 API 使用及 Xcode 配置、敏感词（AI、Dating、赌博、色情等）、第三方 AI 数据共享、App Store 元数据、LaunchScreen.storyboard 和 4–7 个英文字母的 App 名称。用户要求检查、审计、拒审排查、上架前验证，或明确使用 $ios-aside-review 时触发；不得修改目标项目代码或配置。
 ---
 
 # iOS A 面审核检查
@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.1.2`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.1.3`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -79,6 +79,11 @@ python3 scripts/audit_ios_a_side.py ./path/to/project \
   "a_side_source_paths": [],
   "code_line_excluded_paths": [],
   "code_line_threshold": 5000,
+  "source_file_threshold": 20,
+  "unused_code_warn_ratio": 0.10,
+  "unused_code_warn_lines": 300,
+  "unused_code_high_ratio": 0.20,
+  "unused_code_high_lines": 1000,
   "ignored_paths": []
 }
 ```
@@ -106,7 +111,7 @@ IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或�
 - 完整扫描仅有明确旧版购买实现（如 SKPaymentQueue 提交付款）且无 StoreKit 2 证据为 FAIL；没有明确实现、只有导入/配置、不可读取的第三方封装或扫描不完整且无通过证据时为 NOT_VERIFIABLE。
 - 支持 Swift / Objective-C 混合工程中的 Swift 实现，不要求 Objective-C 直接出现 StoreKit 2 API；不推断二进制框架内部版本。
 
-保留文件、行号及 API 摘录，子项参与现有内购汇总。PASS 仅确认存在 StoreKit 2 API 使用，不验证购买成功、发货或完整交易流程。保持 17 项顶层清单及 schema 2.0，无网络请求、构建或运行。
+保留文件、行号及 API 摘录，子项参与现有内购汇总。PASS 仅确认存在 StoreKit 2 API 使用，不验证购买成功、发货或完整交易流程。保持 19 项顶层清单及 schema 2.0，无网络请求、构建或运行。
 
 ## WKWebView 使用检查（LEGAL-001，简化标准）
 
@@ -118,7 +123,7 @@ IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或�
 - 完整扫描无 WKWebView 证据为 FAIL；有 WKWebView 但无法关联加载调用为 NOT_VERIFIABLE；读取不完整且缺少通过证据时为 NOT_VERIFIABLE。
 - 不再判断协议外跳、Safari 或多入口混用。工程任意页面的 WKWebView 加载均可满足本项。
 
-不请求协议 URL，不检查部署或真机效果。PASS 仅证明工程存在 WKWebView 加载实现，不证明隐私协议、用户协议已接入，也不证明该方法实际执行。GitHub 更新检查独立保留。报告名称改为“WKWebView 使用（简化）”，保留 LEGAL-001、17 项清单及 schema 2.0，输出工程级证据，不伪造两类协议入口明细。
+不请求协议 URL，不检查部署或真机效果。PASS 仅证明工程存在 WKWebView 加载实现，不证明隐私协议、用户协议已接入，也不证明该方法实际执行。GitHub 更新检查独立保留。报告名称改为“WKWebView 使用（简化）”，保留 LEGAL-001、19 项清单及 schema 2.0，输出工程级证据，不伪造两类协议入口明细。
 
 ## A 面有效代码行数（CODE-001）
 
@@ -141,6 +146,30 @@ IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或�
 两个路径字段均为相对根目录的精确路径列表，不使用 glob。重叠目录中的同一文件只计一次，不跟随指向根目录外的符号链接。默认工程或显式目录中没有符合条件的源码时按 0 行判 `FAIL`；显式路径无效或读取/解码/词法解析失败时为 `NOT_VERIFIABLE`，部分统计达到阈值也不能判通过。阈值为非负整数，比较关系始终为严格大于。
 
 PDF 完整清单显示状态、有效行数、文件数和门槛。内部证据及显式请求的 JSON/Markdown 保留每个文件的相对路径、总行数、空白行、纯注释行和有效代码行。此检查不要求修改或自动补充目标项目代码。
+
+## 疑似无用代码（CODE-002）
+
+新增独立顶层检查，完整清单变为 19 项，schema 2.0 不变。只读源码扫描，不构建、不运行、不删除代码。与 CODE-001 使用同一 A 面范围、默认排除规则及有效物理行定义。
+
+采用保守的静态候选规则：检测带明确函数体的 Swift private/fileprivate 函数是否缺少函数体之外的引用。自身递归不作为外部使用；其它位置的同名引用保留该候选，避免借用名字判断“确定无用”。代理、协议实现、override、动态调用、@objc/@IBAction/@IBOutlet、Objective-C 运行时相关实现不据此认定无用。源码字符串、selector、storyboard/配置中的明确名称引用可保留候选，注释不作为引用。
+
+候选函数覆盖的有效物理行取并集，避免嵌套重复计数。疑似占比 = 候选有效行数 / A 面有效行数。此数值只覆盖可识别候选，是估算下界，不等同于整个工程真实无用代码比例；不评价代码业务价值、故意填充或编译器最终删除情况，不修改 CODE-001 的行数结果。
+
+默认建议（工程维护标准，不是 Apple 规则）：达到 10% 且至少 300 行为中优先级 WARN；达到 20% 且至少 1000 行为高优先级 WARN。两个条件均需满足，等于阈值也触发。低于阈值 PASS 仅表示覆盖范围内没有发现过量候选；不证明零无用代码。此项不产生 FAIL。源码不完整、无可分析 Swift 源码或策略无效时为 NOT_VERIFIABLE。
+
+阈值可通过策略配置：`unused_code_warn_ratio: 0.10`、`unused_code_warn_lines: 300`、`unused_code_high_ratio: 0.20`、`unused_code_high_lines: 1000`。比例在 [0, 1] 范围，行数为非负整数，高优先级阈值不得低于普通阈值；布尔值不作为合法数字。
+
+报告包含候选行数、占比、候选数量、覆盖情况和人工复核建议；内部明细及按需 JSON/Markdown 保留路径、行号、结束行和有效行数。Objective-C/C/C++ 方法和动态入口不做“无引用即无用”的推断，覆盖限制须明确展示。
+
+## A 面源码文件数（CODE-003）
+
+默认要求源码文件数严格大于 20：20 个 FAIL，21 个 PASS。作为独立顶层项，完整清单增至 19 项，schema 2.0 不变。这是项目自定数量要求，不是 Apple 审核标准。
+
+复用 CODE-001 的 A 面范围、源码扩展名及排除规则。只统计具有至少一行有效代码的源码文件；空文件、纯注释文件、图片、storyboard、配置、文档、测试、第三方、B 面及生成文件不计入。同一文件仅计一次，范围重叠不重复计算。
+
+完整扫描文件数 > `source_file_threshold`（默认 20）为 PASS，否则 FAIL；范围无效、文件读取或词法统计不完整时为 NOT_VERIFIABLE，部分文件数达到要求也不能通过。阈值必须为非负整数，布尔值不接受。此项与有效代码总行数独立：CODE-001 未超过 5000 行不会使文件数检查自动失败。
+
+PDF 显示有效源码文件数和要求；按需 JSON/Markdown 保留已计文件路径及有效行数。扫描保持只读，不生成文件凑数量。
 
 ## Restore 与 LaunchScreen 证据边界
 

@@ -2,7 +2,7 @@
 
 iOS A 面审核技能
 
-版本：**1.1.2**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
+版本：**1.1.3**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
 
 ## 安装
 
@@ -32,11 +32,13 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 
 完整规则见 [SKILL.md](SKILL.md) 与 [规则参考](references/rules.md)。其中：
 
-- StoreKit 2 简化检查：任一明确 API 用法即可通过，允许新旧混用；并入内购汇总，保持 17 项。不追踪完整购买流程，不把导入、注释或普通同名方法作为证据。
+- StoreKit 2 简化检查：任一明确 API 用法即可通过，允许新旧混用；并入内购汇总，保持 19 项。不追踪完整购买流程，不把导入、注释或普通同名方法作为证据。
 - WKWebView 简化检查：工程存在 WKWebView 初始化/明确类型及对应加载调用即可。不识别按钮或协议入口，不要求代理、URL、挂载或调用可达性，不联网验证；通过不证明两类协议已接入。
 - 同一档位同时含 `id` 与 `productId` 时只统计真实商品 ID，不需修改项目字段名规避重复计数。
 - 档位按商品列表原有价格顺序，从默认 $0.99 起递增判断，不要求名称或商品 ID 包含序号。
 - 存在非空应用描述文案即通过描述检查，不要求包含内购用语。
+- 疑似无用代码：保守识别 Swift 私有函数候选；达到 10% 且 300 行提醒，达到 20% 且 1000 行高优先级提醒，均为 WARN。只读估算，不自动删除代码。
+- A 面源码文件数必须严格超过 20：20 个失败，21 个通过；沿用 A 面范围，空文件、纯注释和非源码不计入。
 - A 面有效源码必须严格超过 5000 行，排除空行和纯注释；默认直接统计传入工程，`a_side_source_paths` 缺省或 `[]` 均使用根目录，具体口径见 SKILL.md。
 - Restore 按实际代码/操作入口检查，协议中“不提供恢复购买”的说明不会因关键词误报。
 - LaunchScreen 支持新版 Xcode 文件夹同步，核对对应 target、同步目录与排除名单。
@@ -48,7 +50,7 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
-测试使用模拟 GitHub 响应，协议审计禁止网络请求，不依赖公网，也不会修改已安装技能。开发者更新 `VERSION` 和发布说明后提交，再创建与版本相同的标签（例如 `v1.1.2`）。发布工作流会运行测试、核对标签与 VERSION，并创建带安装 ZIP 的正式 GitHub Release。只有 Release 发布成功后，使用者才会收到更新。
+测试使用模拟 GitHub 响应，协议审计禁止网络请求，不依赖公网，也不会修改已安装技能。开发者更新 `VERSION` 和发布说明后提交，再创建与版本相同的标签（例如 `v1.1.3`）。发布工作流会运行测试、核对标签与 VERSION，并创建带安装 ZIP 的正式 GitHub Release。只有 Release 发布成功后，使用者才会收到更新。
 
 首个发布标签为 `v1.0.0`。不要复用或移动已经发布的版本标签。
 

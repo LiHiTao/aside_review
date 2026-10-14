@@ -86,5 +86,5 @@ class StoreKitUsageTests(unittest.TestCase):
             summary = next(f for f in report['findings'] if f['id']=='IAP-SUMMARY')
             detail = next(f for f in summary['details'] if f['id']=='IAP-010')
             self.assertEqual('PASS', detail['status'])
-            self.assertEqual(17, len(RULE_ORDER))
+            self.assertEqual(19, len(RULE_ORDER))
             self.assertIn('完整交易流程', detail['actual'])

@@ -191,6 +191,8 @@ class AuditTests(unittest.TestCase):
             (root / "Carvory" / "Business.swift").write_text(
                 "\n".join(f"let fixtureLine{index} = {index}" for index in range(5001))
             )
+            for index in range(18):
+                (root / "Carvory" / f"Feature{index}.swift").write_text(f"struct Feature{index} {{}}\n")
             report = Auditor(root, DEFAULT_POLICY).run().report(only_failures=False)
             self.assertEqual(report["summary"]["FAIL"], 0, report["findings"])
             self.assertGreater(report["summary"]["PASS"], 0)

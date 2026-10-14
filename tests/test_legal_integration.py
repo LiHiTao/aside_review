@@ -55,7 +55,7 @@ class PolicyPage: UIViewController {
             finding = next(f for f in report["findings"] if f["id"] == "LEGAL-001")
             self.assertEqual(finding["status"], "PASS", finding)
             self.assertEqual(len(finding["details"]), 1)
-            self.assertEqual(len(report["findings"]), 17)
+            self.assertEqual(len(report["findings"]), 19)
             self.assertEqual(report["schema_version"], "2.0")
             self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
 
@@ -110,7 +110,7 @@ struct LocalPage: UIViewRepresentable {
             self.assertEqual(finding["status"], "PASS", finding)
             self.assertEqual(len(finding["details"]), 1, finding)
             self.assertTrue(all(d["evidence"][0]["path"] == "Document.swift" for d in finding["details"]))
-            self.assertEqual(len(report["findings"]), 17)
+            self.assertEqual(len(report["findings"]), 19)
             self.assertEqual(report["schema_version"], "2.0")
             self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
 
@@ -125,7 +125,7 @@ struct LocalPage: UIViewRepresentable {
             self.assertEqual(len(finding["details"]), 1, finding)
             self.assertEqual(finding["details"][0]["label"], "工程 WKWebView 使用")
             self.assertEqual(before, {p.name: p.read_bytes() for p in root.iterdir()})
-            self.assertEqual(len(report["findings"]), 17)
+            self.assertEqual(len(report["findings"]), 19)
 
     def test_external_routes_are_outside_project_level_check(self):
         for name in ("Locker.swift", "Profile.swift"):
@@ -212,8 +212,8 @@ class LegalPane: UIViewController {
             self.assertNotIn("LEGAL-002", findings)
             self.assertEqual(report["schema_version"], "2.0")
             self.assertEqual(tuple(findings), RULE_ORDER)
-            self.assertEqual(len(RULE_ORDER), 17)
-            self.assertEqual(sum(report["summary"].values()), 17)
+            self.assertEqual(len(RULE_ORDER), 19)
+            self.assertEqual(sum(report["summary"].values()), 19)
             markdown = markdown_report(report)
             for removed in ("LEGAL-002", "协议 URL 可访问性", "http_status", "checked_at", "联网记录"):
                 self.assertNotIn(removed, markdown)
@@ -276,7 +276,7 @@ class LegalPane: UIViewController {
             finding = next(f for f in Auditor(root).run().report()["findings"] if f["id"] == "LEGAL-001")
             self.assertEqual(finding["status"], "PASS", finding)
 
-    def test_pdf_contains_static_legal_row_and_all_17_rules(self):
+    def test_pdf_contains_static_legal_row_and_all_19_rules(self):
         from scripts.render_audit_pdf import preflight_pdf, render_audit_pdf
         try:
             preflight_pdf()
@@ -294,7 +294,7 @@ class LegalPane: UIViewController {
             text = "\n".join(p.extract_text() or "" for p in reader.pages)
             for rule in RULE_ORDER:
                 self.assertIn(rule, text)
-            self.assertEqual(len(RULE_ORDER), 17)
+            self.assertEqual(len(RULE_ORDER), 19)
             self.assertNotIn("LEGAL-002", text)
             self.assertNotIn("协议 URL 可访问性", text)
             for page in reader.pages:

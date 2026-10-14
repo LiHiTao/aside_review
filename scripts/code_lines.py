@@ -252,3 +252,36 @@ def audit_code_lines(root: Path, policy: Mapping) -> dict:
         result["severity"] = "info" if total > threshold else "high"
         result["actual"] = f"A 面有效代码 {total:,} 行，{len(files)} 个文件；要求 > {threshold:,} 行"
     return result
+
+
+def audit_source_file_count(root: Path, policy: Mapping, code_result: Mapping | None = None) -> dict:
+    """Count unique selected source files containing effective code, independently of LOC."""
+    threshold = policy.get("source_file_threshold", 20)
+    result = {"id": "CODE-003", "status": "NOT_VERIFIABLE", "severity": "medium",
+              "title": "A 面源码文件数", "expected": f"A 面含有效代码的源码文件数严格大于 {threshold} 个（项目自定门槛）",
+              "actual": "", "evidence": [], "manual_check": None, "details": []}
+    if isinstance(threshold, bool) or not isinstance(threshold, int) or threshold < 0:
+        result["actual"] = "source_file_threshold 必须是非负整数"
+        result["manual_check"] = "修正文件数门槛配置后重新扫描。"
+        return result
+    line_threshold = policy.get("code_line_threshold", 5000)
+    # A malformed LOC threshold must not disable the independent file-count rule.
+    if code_result is None or isinstance(line_threshold, bool) or not isinstance(line_threshold, int) or line_threshold < 0:
+        code_result = audit_code_lines(root, {**policy, "code_line_threshold": 0})
+    details = code_result.get("details", [])
+    selected = {item["path"]: item for item in details
+                if item.get("status") == "PASS" and item.get("code_lines", 0) > 0 and item.get("path")}
+    count = len(selected)
+    result["details"] = [{"label": path, "path": path, "status": "PASS",
+                           "actual": f"计入 1 个源码文件；有效代码 {item['code_lines']} 行",
+                           "code_lines": item["code_lines"]} for path, item in sorted(selected.items())]
+    result["evidence"] = [{"path": item["path"], "line": 1, "excerpt": item["actual"]}
+                          for item in result["details"]]
+    if code_result.get("status") == "NOT_VERIFIABLE":
+        result["actual"] = f"统计不完整，已计 {count} 个含有效代码的源码文件；{code_result['actual']}"
+        result["manual_check"] = code_result.get("manual_check")
+    else:
+        result["status"] = "PASS" if count > threshold else "FAIL"
+        result["severity"] = "info" if count > threshold else "high"
+        result["actual"] = f"A 面含有效代码的源码文件 {count} 个；要求 > {threshold} 个；空文件及纯注释文件不计入"
+    return result

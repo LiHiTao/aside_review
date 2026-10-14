@@ -24,7 +24,8 @@ try:
     from .update_skill import UpdateError, ensure_latest
     from .restore_detection import detect_restore
     from .launch_membership import evaluate_membership
-    from .code_lines import audit_code_lines
+    from .code_lines import audit_code_lines, audit_source_file_count
+    from .unused_code import audit_unused_code
     from .product_context import identity_fields
     from .product_references import ProductReferences, field_expression
     from .legal_links import analyze_webview_usage
@@ -33,7 +34,8 @@ except ImportError:
     from update_skill import UpdateError, ensure_latest
     from restore_detection import detect_restore
     from launch_membership import evaluate_membership
-    from code_lines import audit_code_lines
+    from code_lines import audit_code_lines, audit_source_file_count
+    from unused_code import audit_unused_code
     from product_context import identity_fields
     from product_references import ProductReferences, field_expression
     from legal_links import analyze_webview_usage
@@ -48,6 +50,11 @@ DEFAULT_POLICY: dict[str, Any] = {
     "app_name_max_letters": 7,
     "description_max_chars": 55,
     "purpose_min_chars": 20,
+    "source_file_threshold": 20,
+    "unused_code_warn_ratio": 0.10,
+    "unused_code_warn_lines": 300,
+    "unused_code_high_ratio": 0.20,
+    "unused_code_high_lines": 1000,
     "forbid_restore": True,
     "forbid_notification_delegate": True,
     "forbid_privacy_manifest": True,
@@ -231,6 +238,8 @@ SEVERITY_PRIORITY = {"info": 0, "low": 1, "medium": 2, "high": 3, "blocker": 4}
 
 RULE_ORDER = (
     "CODE-001",
+    "CODE-002",
+    "CODE-003",
     "IAP-SUMMARY",
     "AB-001",
     "IAP-009",
@@ -251,6 +260,8 @@ RULE_ORDER = (
 
 RULE_TITLES = {
     "CODE-001": "A 面有效代码行数",
+    "CODE-002": "疑似无用代码",
+    "CODE-003": "A 面源码文件数",
     "IAP-SUMMARY": "内购项统一检查",
     "AB-001": "A 面通知代理",
     "IAP-009": "恢复购买入口",
@@ -855,8 +866,13 @@ class Auditor:
 
     def check_code_lines(self) -> None:
         finding = audit_code_lines(self.root, self.policy)
+        unused = audit_unused_code(self.root, self.policy, self.source_texts, self.all_texts,
+                                   code_result=finding, scan_incomplete=self.source_scan_incomplete)
+        file_count = audit_source_file_count(self.root, self.policy, code_result=finding)
         rule_id = finding.pop("id")
         self.add(rule_id=rule_id, **finding)
+        self.add(rule_id=unused.pop("id"), **unused)
+        self.add(rule_id=file_count.pop("id"), **file_count)
 
     def check_iap(self) -> None:
         checks: list[dict[str, Any]] = []
