@@ -131,7 +131,7 @@ class UnusedCodeTests(unittest.TestCase):
             root = Path(directory)
             (root / 'Code.swift').write_text('private func helper() {}\n')
             report = Auditor(root).run().report()
-            self.assertEqual(len(RULE_ORDER), 19)
+            self.assertEqual(len(RULE_ORDER), 20)
             self.assertEqual(RULE_ORDER[:2], ('CODE-001', 'CODE-002'))
             self.assertEqual(report['schema_version'], '2.0')
             finding = next(item for item in report['findings'] if item['id'] == 'CODE-002')

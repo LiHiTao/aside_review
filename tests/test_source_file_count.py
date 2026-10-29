@@ -96,7 +96,7 @@ class SourceFileCountTests(unittest.TestCase):
         self.populate(21)
         before = {p.relative_to(self.root): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
         report = Auditor(self.root).run().report()
-        self.assertEqual(19, len(RULE_ORDER))
+        self.assertEqual(20, len(RULE_ORDER))
         self.assertEqual(('CODE-001', 'CODE-002', 'CODE-003'), RULE_ORDER[:3])
         self.assertEqual(RULE_ORDER, tuple(item['id'] for item in report['findings']))
         self.assertEqual('PASS', next(item for item in report['findings'] if item['id'] == 'CODE-003')['status'])

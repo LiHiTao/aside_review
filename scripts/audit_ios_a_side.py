@@ -30,6 +30,7 @@ try:
     from .product_references import ProductReferences, field_expression
     from .legal_links import analyze_webview_usage
     from .storekit_usage import analyze_storekit_usage
+    from .hidden_feature_risks import analyze_hidden_risks
 except ImportError:
     from update_skill import UpdateError, ensure_latest
     from restore_detection import detect_restore
@@ -40,6 +41,7 @@ except ImportError:
     from product_references import ProductReferences, field_expression
     from legal_links import analyze_webview_usage
     from storekit_usage import analyze_storekit_usage
+    from hidden_feature_risks import analyze_hidden_risks
 
 
 DEFAULT_POLICY: dict[str, Any] = {
@@ -248,6 +250,7 @@ RULE_ORDER = (
     "ATT-001",
     "ATT-002",
     "LEGAL-001",
+    "REVIEW-001",
     "PRIV-001",
     "META-001",
     "META-002",
@@ -270,6 +273,7 @@ RULE_TITLES = {
     "ATT-001": "ATT Xcode 配置",
     "ATT-002": "ATT 用途文案",
     "LEGAL-001": "WKWebView 使用（简化）",
+    "REVIEW-001": "5.6 隐藏功能与展示真实性风险",
     "PRIV-001": "第三方 AI 数据共享",
     "META-001": "商店应用描述",
     "META-002": "免费与价格声明",
@@ -845,6 +849,7 @@ class Auditor:
         self.check_ab_and_restore()
         self.check_permissions()
         self.check_legal_links()
+        self.check_hidden_risks()
         self.check_ai_and_metadata()
         self.check_privacy_manifest()
         self.check_sensitive_terms()
@@ -863,6 +868,12 @@ class Auditor:
             "expected": expected, **entry,
         }
         self.add_group("LEGAL-001", "WKWebView 使用（简化）", expected, [detail])
+
+    def check_hidden_risks(self) -> None:
+        result = analyze_hidden_risks(self.root, self.source_texts, self.all_texts,
+                                      scan_incomplete=self.source_scan_incomplete)
+        self.add("REVIEW-001", title="5.6 隐藏功能与展示真实性风险",
+                 expected="功能与展示结果透明、准确；不通过隐藏条件规避审核", **result)
 
     def check_code_lines(self) -> None:
         finding = audit_code_lines(self.root, self.policy)
