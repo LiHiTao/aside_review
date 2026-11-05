@@ -1,6 +1,6 @@
 ---
 name: ios-aside-review
-description: 对目录结构不固定的 iOS A 面项目执行只读上架风险审计。按简化标准检查工程 WKWebView 初始化/类型与加载调用、A 面有效代码是否超过 5000 行、疑似无用代码量、源码文件数是否超过 20、隐藏功能与展示真实性风险、StoreKit 内购与 JSON 配置、B 面通知代理冲突、restore 功能、PrivacyInfo.xcprivacy、相机/相册/麦克风/推送/ATT 的 API 使用及 Xcode 配置、敏感词（AI、Dating、赌博、色情等）、第三方 AI 数据共享、App Store 元数据、LaunchScreen.storyboard 和 4–7 个英文字母的 App 名称。用户要求检查、审计、拒审排查、上架前验证，或明确使用 $ios-aside-review 时触发；不得修改目标项目代码或配置。
+description: 用于目录结构不固定的 iOS A 面项目只读上架风险审计。适用于上架前检查、拒审排查、批量展开代码行数复核、疑似无用代码、隐藏功能、StoreKit、WKWebView、权限、隐私与商店元数据检查，以及用户明确使用 $ios-aside-review 的场景。
 ---
 
 # iOS A 面审核检查
@@ -11,7 +11,7 @@ description: 对目录结构不固定的 iOS A 面项目执行只读上架风险
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.2.0`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.2.1`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -147,9 +147,9 @@ IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或�
 
 PDF 完整清单显示状态、有效行数、文件数和门槛。内部证据及显式请求的 JSON/Markdown 保留每个文件的相对路径、总行数、空白行、纯注释行和有效代码行。此检查不要求修改或自动补充目标项目代码。
 
-## 疑似无用代码（CODE-002）
+## 疑似无用代码与批量展开（CODE-002）
 
-新增独立顶层检查，完整清单变为 20 项，schema 2.0 不变。只读源码扫描，不构建、不运行、不删除代码。与 CODE-001 使用同一 A 面范围、默认排除规则及有效物理行定义。
+完整清单 20 项，schema 2.0。只读源码扫描，与 CODE-001 使用同一 A 面范围、排除规则及有效物理行定义。
 
 采用保守的静态候选规则：检测带明确函数体的 Swift private/fileprivate 函数是否缺少函数体之外的引用。自身递归不作为外部使用；其它位置的同名引用保留该候选，避免借用名字判断“确定无用”。代理、协议实现、override、动态调用、@objc/@IBAction/@IBOutlet、Objective-C 运行时相关实现不据此认定无用。源码字符串、selector、storyboard/配置中的明确名称引用可保留候选，注释不作为引用。
 
@@ -160,6 +160,10 @@ PDF 完整清单显示状态、有效行数、文件数和门槛。内部证据�
 阈值可通过策略配置：`unused_code_warn_ratio: 0.10`、`unused_code_warn_lines: 300`、`unused_code_high_ratio: 0.20`、`unused_code_high_lines: 1000`。比例在 [0, 1] 范围，行数为非负整数，高优先级阈值不得低于普通阈值；布尔值不作为合法数字。
 
 报告包含候选行数、占比、候选数量、覆盖情况和人工复核建议；内部明细及按需 JSON/Markdown 保留路径、行号、结束行和有效行数。Objective-C/C/C++ 方法和动态入口不做“无引用即无用”的推断，覆盖限制须明确展示。
+
+同一 Swift 代码块内，对同一简单变量连续写出至少 100 条静态数据 `.append(...)` 时单独给出 `WARN`，即使初始化函数确实被调用。统计源码中的调用点及其有效物理行，报告候选展开行数和扣除后的参考有效行数。循环中的单个调用点只算一次。展开行与无用函数候选分开呈现，`CODE-001` 的 5000 行门槛继续按原始有效行数判定。
+
+批量展开的识别与计数边界见 [规则参考](references/rules.md#批量静态数据展开)。
 
 ## A 面源码文件数（CODE-003）
 

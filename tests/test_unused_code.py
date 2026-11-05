@@ -138,6 +138,46 @@ class UnusedCodeTests(unittest.TestCase):
             self.assertEqual(finding['status'], 'PASS')
             self.assertEqual(finding['details'][0]['candidate_count'], 1)
 
+    def test_large_reachable_catalog_is_reported_separately_from_unused_functions(self):
+        rows = ''.join(f'    items.append(Caption(month: {i}, title: "Caption {i}"))\n'
+                       for i in range(100))
+        raw = 'func catalog() {\n    var items: [Caption] = []\n' + rows + '    consume(items)\n}\n'
+        result = self.check(raw, extra={'Vendor/Generated.swift': raw})
+        self.assertEqual(result['status'], 'WARN')
+        self.assertEqual(self.metrics(result)['suspected_lines'], 0)
+        summary, block = result['details'][-2:]
+        self.assertEqual(summary['expanded_lines'], 100)
+        self.assertEqual(summary['code_lines_without_expansion'], 4)
+        self.assertEqual((block['path'], block['line'], block['end_line'], block['append_count']),
+                         ('Business.swift', 3, 102, 100))
+        self.assertIn('参考有效行数 4', result['actual'])
+
+    def test_audit_preserves_loc_gate_when_expansion_is_found(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw = 'func catalog() {\n    var items: [Int] = []\n' + '    items.append(1)\n' * 100 + '}\n'
+            (root / 'Catalog.swift').write_text(raw)
+            findings = {item['id']: item for item in
+                        Auditor(root, {'code_line_threshold': 50}).run().report()['findings']}
+            self.assertEqual(findings['CODE-001']['status'], 'PASS')
+            self.assertIn('103 行', findings['CODE-001']['actual'])
+            self.assertEqual(findings['CODE-002']['status'], 'WARN')
+
+    def test_known_expansion_is_reported_without_estimate_when_scope_is_incomplete(self):
+        raw = 'func catalog() {\n' + '    items.append(1)\n' * 100 + '}\n'
+        result = self.check(raw, extra={'Broken.swift': 'let title = "unfinished'})
+        self.assertEqual(result['status'], 'WARN')
+        self.assertEqual(result['details'][-2]['expanded_lines'], 100)
+        self.assertIsNone(result['details'][-2]['code_lines_without_expansion'])
+        self.assertIn('参考有效行数需复核', result['actual'])
+
+    def test_unsupported_candidate_scope_preserves_uncertainty(self):
+        rows = '    items.append(1)\n' * 100
+        result = self.check('func catalog() {\n' + rows + '}\nlet pattern = #/rows/#\n')
+        self.assertEqual(result['status'], 'NOT_VERIFIABLE')
+        self.assertIn('批量展开扫描不完整', result['actual'])
+        self.assertEqual(result['details'][-1]['skipped_files'], ['Business.swift'])
+
 
 if __name__ == '__main__':
     unittest.main()

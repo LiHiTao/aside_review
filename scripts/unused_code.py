@@ -1,4 +1,4 @@
-"""Conservative source-only unused private Swift function candidates.
+"""Source-only review of unused private Swift functions and expanded data.
 
 This deliberately does not prove runtime unreachability or cover all dead code.
 """
@@ -11,9 +11,11 @@ import re
 from typing import Mapping
 
 try:
+    from .append_expansion import MIN_APPEND_CALLS, find_append_expansions
     from .code_lines import audit_code_lines, count_source_lines, LexicalError
     from .restore_detection import _lex
 except ImportError:
+    from append_expansion import MIN_APPEND_CALLS, find_append_expansions
     from code_lines import audit_code_lines, count_source_lines, LexicalError
     from restore_detection import _lex
 
@@ -28,6 +30,73 @@ def audit_unused_code(root: Path, policy: Mapping, sources: Mapping[Path, str] |
                       all_texts: Mapping[Path, str] | None = None, *,
                       code_result: dict | None = None, scan_incomplete: bool = False) -> dict:
     root = root.resolve()
+    counted = code_result if code_result is not None else audit_code_lines(root, policy)
+    finding = _audit_unused_functions(root, policy, sources, all_texts, counted, scan_incomplete)
+    finding['title'] = '疑似无用代码与批量展开'
+    finding['expected'] = '疑似无用代码低于建议复核门槛，且未发现大块逐条追加静态数据'
+
+    selected = [item for item in counted['details'] if item.get('status') == 'PASS' and item.get('path')]
+    swift_paths = [root / item['path'] for item in selected
+                   if Path(item['path']).suffix.lower() == '.swift' and item['code_lines']]
+    blocks = []
+    skipped = []
+    for path in swift_paths:
+        relative = path.relative_to(root).as_posix()
+        try:
+            raw = (sources or {}).get(path)
+            if raw is None:
+                raw = path.read_text(encoding='utf-8-sig')
+            expansions = find_append_expansions(raw)
+        except (OSError, UnicodeError, LexicalError, RecursionError):
+            skipped.append(relative)
+            continue
+        for block in expansions:
+            description = (f"{block['receiver']}.append 连续 {block['append_count']:,} 次，"
+                           f"第 {block['line']}–{block['end_line']} 行中有效 {block['effective_lines']:,} 行")
+            blocks.append({'label': '逐条追加静态数据', 'path': relative, 'status': 'WARN',
+                           'actual': description, **block})
+
+    incomplete = counted['status'] == 'NOT_VERIFIABLE' or bool(skipped)
+    if skipped:
+        finding['details'].append({'label': '批量展开覆盖范围', 'status': 'NOT_VERIFIABLE',
+                                   'actual': '候选文件无法完整解析', 'skipped_files': skipped})
+    if not blocks:
+        if incomplete:
+            if finding['status'] == 'PASS':
+                finding.update(status='NOT_VERIFIABLE', severity='medium')
+            finding['actual'] += '批量展开扫描不完整。'
+        elif swift_paths:
+            finding['actual'] += f'未发现达到 {MIN_APPEND_CALLS} 次门槛的逐条追加块。'
+        return finding
+
+    blocks.sort(key=lambda block: (-block['append_count'], block['path'], block['line']))
+    expanded = sum(block['effective_lines'] for block in blocks)
+    total = sum(item['code_lines'] for item in selected)
+    estimate = total - expanded if not incomplete else None
+    calls = sum(block['append_count'] for block in blocks)
+    first = blocks[0]
+    headline = (f"批量逐条追加 {len(blocks)} 处，共 {calls:,} 次，涉及 {expanded:,} 个有效行。"
+                f"最大块 {first['path']}:{first['line']}（{first['append_count']:,} 次）。")
+    if estimate is not None:
+        headline += f'扣除这些展开行后的参考有效行数 {estimate:,} 行（原始 {total:,} 行）。'
+    else:
+        headline += '统计范围不完整，参考有效行数需复核。'
+    finding['actual'] = headline + finding['actual']
+    finding['status'] = 'WARN'
+    if finding['severity'] != 'high':
+        finding['severity'] = 'medium'
+    review = '复核数据能否改为循环或资源加载，并核对数据值与顺序。'
+    finding['manual_check'] = ' '.join(filter(None, [finding['manual_check'], review]))
+    finding['details'] += [{'label': '批量展开统计', 'status': 'WARN', 'actual': headline,
+                            'append_count': calls, 'expanded_lines': expanded,
+                            'code_lines_without_expansion': estimate}] + blocks
+    finding['evidence'] = [{'path': block['path'], 'line': block['line'], 'excerpt': block['actual']}
+                           for block in blocks[:10]] + finding['evidence']
+    return finding
+
+
+def _audit_unused_functions(root: Path, policy: Mapping, sources: Mapping[Path, str] | None,
+                            all_texts: Mapping[Path, str] | None, counted: dict, scan_incomplete: bool) -> dict:
     finding = {'id': 'CODE-002', 'status': 'NOT_VERIFIABLE', 'severity': 'medium',
                'title': '疑似无用代码', 'expected': '疑似无用代码少于建议复核门槛（项目经验标准）',
                'actual': '', 'evidence': [], 'manual_check': None, 'details': []}
@@ -47,7 +116,6 @@ def audit_unused_code(root: Path, policy: Mapping, sources: Mapping[Path, str] |
         finding['actual'] = '策略配置无效：' + '、'.join(invalid)
         finding['manual_check'] = '比例需为 0 至 1 的有限数字，行数需为非负整数；修正后重新扫描。'
         return finding
-    counted = code_result if code_result is not None else audit_code_lines(root, policy)
     selected = [d for d in counted.get('details', []) if d.get('status') == 'PASS' and d.get('path')]
     denominator = sum(d.get('code_lines', 0) for d in selected)
     if counted.get('status') == 'NOT_VERIFIABLE' or scan_incomplete or not denominator:

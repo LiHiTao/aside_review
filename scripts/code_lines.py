@@ -29,13 +29,9 @@ class LexicalError(ValueError):
     """Incomplete lexical evidence must never pass the threshold."""
 
 
-def count_source_lines(text: str, suffix: str = ".swift") -> dict[str, int]:
-    """Partition physical lines into code, blank and pure comment lines.
-
-    Mask comments with spaces while preserving strings and line boundaries. Swift
-    interpolation is parsed as code, including nested strings and comments.
-    """
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
+def mask_source_comments(text: str, suffix: str, *,
+                         swift_strings: dict[int, int] | None = None) -> str:
+    """Mask comments in normalized text, optionally recording outer Swift strings."""
     if "\x00" in text:
         raise LexicalError("源码含 NUL 字符")
     masked = list(text)
@@ -110,6 +106,8 @@ def count_source_lines(text: str, suffix: str = ".swift") -> dict[str, int]:
                 opening = None
             if opening:
                 pos = string(pos, *opening.groups())
+                if swift and not interpolation and swift_strings is not None:
+                    swift_strings[start] = pos
                 continue
             if interpolation:
                 if text[pos] == "(":
@@ -124,8 +122,18 @@ def count_source_lines(text: str, suffix: str = ".swift") -> dict[str, int]:
         return pos
 
     code(0)
+    return "".join(masked)
+
+
+def count_source_lines(text: str, suffix: str = ".swift") -> dict[str, int]:
+    """Partition physical lines into code, blank and pure comment lines.
+
+    Mask comments with spaces while preserving strings and line boundaries. Swift
+    interpolation is parsed as code, including nested strings and comments.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    clean = mask_source_comments(text, suffix).split("\n")
     original = text.split("\n")
-    clean = "".join(masked).split("\n")
     # A terminal newline terminates the preceding physical line, not a new one.
     if not text or text.endswith("\n"):
         original.pop()
