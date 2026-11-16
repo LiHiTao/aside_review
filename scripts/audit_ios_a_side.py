@@ -1262,24 +1262,31 @@ class Auditor:
                     "manual_check": None,
                 })
                 continue
-            if used and not configured:
+            required = used or resource == "microphone"
+            if required and not configured:
                 config_detail = {
                     "id": config_rule,
                     "status": "FAIL",
                     "severity": "high",
                     "label": label,
                     "expected": self._permission_config_expectation(resource, spec),
-                    "actual": "检测到权限 API 使用，但未找到对应 Xcode 配置",
+                    "actual": (
+                        "麦克风为必需配置，未找到 NSMicrophoneUsageDescription"
+                        if resource == "microphone" else "检测到权限 API 使用，但未找到对应 Xcode 配置"
+                    ),
                     "evidence": self._permission_usage_evidence(spec, used_paths),
                     "manual_check": None,
                 }
                 copy_detail = {
                     "id": copy_rule,
-                    "status": "NOT_VERIFIABLE",
-                    "severity": "medium",
+                    "status": "FAIL" if resource == "microphone" else "NOT_VERIFIABLE",
+                    "severity": "high" if resource == "microphone" else "medium",
                     "label": label,
                     "expected": copy_expectation,
-                    "actual": "缺少权限配置，无法检查对应用途文案",
+                    "actual": (
+                        "缺少麦克风权限用途文案 NSMicrophoneUsageDescription"
+                        if resource == "microphone" else "缺少权限配置，无法检查对应用途文案"
+                    ),
                     "evidence": [],
                     "manual_check": "补充 Xcode 权限配置后重新检查用途文案。",
                 }
@@ -1346,13 +1353,13 @@ class Auditor:
         self.add_group(
             "PERM-001",
             "权限 Xcode 配置",
-            "相机、相册、麦克风或 Push API 使用时存在对应 Xcode 配置",
+            "麦克风必须配置 NSMicrophoneUsageDescription；相机、相册或 Push API 使用时存在对应 Xcode 配置",
             permission_config_details,
         )
         self.add_group(
             "PERM-002",
             "权限用途文案",
-            "已配置相机、相册、麦克风权限的用途文案说明资源对象和用途动作；Push 仅检查配置",
+            "麦克风必须提供合格用途文案；已配置相机、相册权限的用途文案说明资源对象和用途动作；Push 仅检查配置",
             permission_copy_details,
         )
         self.add_group(

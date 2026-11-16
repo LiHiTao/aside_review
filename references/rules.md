@@ -123,14 +123,14 @@ Debug 分支必须结合可解析的 Release 构建条件判断；确认 Release
 
 | ID | 检查 | 失败条件 |
 |---|---|---|
-| PERM-001 | Xcode 权限配置 | 发现相机、相册、麦克风或 Push API 使用，却没有对应 Xcode 配置。相机使用 `NSCameraUsageDescription`，相册使用 `NSPhotoLibraryUsageDescription`/`NSPhotoLibraryAddUsageDescription`，麦克风使用 `NSMicrophoneUsageDescription`，Push 使用 `.entitlements` 中的 `aps-environment` 或已启用的 `com.apple.Push` capability。 |
-| PERM-002 | 权限用途文案 | 相机、相册或麦克风配置存在但用途文案为空、少于默认 20 字符，或未说明资源/数据对象和用途动作。Push 不检查用途文案。 |
+| PERM-001 | Xcode 权限配置 | 麦克风未配置时直接失败；相机、相册或 Push 检测到 API 使用却缺少配置时失败。相机使用 `NSCameraUsageDescription`，相册使用 `NSPhotoLibraryUsageDescription`/`NSPhotoLibraryAddUsageDescription`，麦克风使用 `NSMicrophoneUsageDescription`，Push 使用 `.entitlements` 中的 `aps-environment` 或已启用的 `com.apple.Push` capability。 |
+| PERM-002 | 权限用途文案 | 麦克风用途文案缺失，或已配置的相机、相册、麦克风文案为空、少于默认 20 字符，或未说明资源/数据对象和用途动作。Push 不检查用途文案。 |
 | ATT-001 | ATT Xcode 配置 | 发现 ATT API 或追踪标识使用，却没有 `NSUserTrackingUsageDescription` 配置。 |
 | ATT-002 | ATT 用途文案 | `NSUserTrackingUsageDescription` 存在但为空，或为“个性化推荐 / personalized recommendations / personalized content”等通用默认推荐模板；其它非空文案通过。 |
 
-API 证据只用于判断是否需要配置；配置存在但扫描不到 API 不会失败。相机、相册和麦克风用途文案检查仅验证文本存在、长度和基本的资源/数据对象与用途动作，不判断文案是否契合产品主题。Push 仅检查权限配置：值为 `development` / `production` 的有效 `aps-environment` 或已启用 `com.apple.Push` capability 存在即通过，不检查通知/提醒用途文案。ATT 仅检查配置和文案；配置存在且文案非空、不是通用默认个性化推荐模板即通过；不检查最小长度、追踪/广告关键词或用途动作，不要求存在 ATT 请求调用。具体用途中的 personalized ads 本身不视为默认推荐模板。
+麦克风必须提供 NSMicrophoneUsageDescription，未检测到 API 也须检查。缺失时 PERM-001 和 PERM-002 均为 FAIL。这是项目自定检查要求。其它权限通过 API 证据判断是否需要配置；配置存在但扫描不到 API 不会失败。相机、相册和麦克风用途文案检查仅验证文本存在、长度和基本的资源/数据对象与用途动作，不判断文案是否契合产品主题。Push 仅检查权限配置：值为 `development` / `production` 的有效 `aps-environment` 或已启用 `com.apple.Push` capability 存在即通过，不检查通知/提醒用途文案。ATT 仅检查配置和文案；配置存在且文案非空、不是通用默认个性化推荐模板即通过；不检查最小长度、追踪/广告关键词或用途动作，不要求存在 ATT 请求调用。具体用途中的 personalized ads 本身不视为默认推荐模板。
 
-PERM-001 按相机、相册、麦克风和 Push 聚合展示；PERM-002 只判定相机、相册和麦克风文案，Push 不参与文案判定；未使用且未配置某权限时，相应子检查以 `PASS` 表示未触发配置要求。ATT-001 与 ATT-002 独立展示。
+PERM-001 按相机、相册、麦克风和 Push 聚合展示；PERM-002 只判定相机、相册和麦克风文案，Push 不参与文案判定；相机、相册、Push、ATT 未使用且未配置时，相应子检查以 `PASS` 表示未触发配置要求。ATT-001 与 ATT-002 独立展示。
 
 本组规则不检查 ATT 请求调用、请求时机、系统权限弹窗、清除权限后的流程、自定义授权按钮或运行时 Push 行为；这些不属于本 Skill 的静态判定范围。
 

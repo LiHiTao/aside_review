@@ -11,7 +11,7 @@ description: 用于目录结构不固定的 iOS A 面项目只读上架风险审
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.2.1`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.2.2`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -212,7 +212,7 @@ Debug 分支必须结合可解析的 Release 构建条件判断；确认 Release
 
 相册用途动作支持 `export`、`exports`、`exported`、`exporting` 和“导出”；英文按完整词匹配，仍要求资源对象和原有最短长度，不能仅出现 exporter 等名词就通过。
 
-权限检查的 API 证据只用于判断该权限是否需要配置：发现相机、相册、麦克风、ATT 或 Push API 使用时，必须能在 Xcode 的 `Info.plist`、`InfoPlist.strings`、Build Settings（`INFOPLIST_KEY_*`）、`.xcconfig` 或 `.entitlements` 中找到对应配置。Push 只检查权限配置：存在值为 `development` / `production` 的有效 `aps-environment` 或启用的 `com.apple.Push` capability 即通过，无需通知用途文案，不因扫描不到 API 而失败。未使用且未配置 Push 时不触发要求；发现 API 但缺少配置时失败。ATT 仅检查 `NSUserTrackingUsageDescription` 配置是否存在以及文案是否合理；配置存在且文案合理即通过，无需发现 ATT 请求调用。ATT-002 只检查文案非空且不是“个性化推荐 / personalized recommendations / personalized content”等通用默认推荐模板；满足即通过。不再要求达到 20 字符或包含追踪、广告、数据对象与用途动作关键词。不得仅因具体用途文案含 personalized ads 就判为默认推荐模板。未使用且未配置 ATT 时不触发要求。不会因为“声明但扫描不到 API”而失败，也不检查文案与产品主题是否匹配、ATT 请求调用、请求时机、系统弹窗、自定义授权按钮或运行时 Push 行为。
+麦克风为项目必需配置，即使未扫描到麦克风 API，也必须提供 NSMicrophoneUsageDescription；缺失时 PERM-001 和 PERM-002 均为 FAIL。配置存在但文案为空、过短或缺少资源对象与用途动作时，PERM-002 为 FAIL。相机、相册、ATT 和 Push 通过 API 证据判断是否需要配置，发现使用时必须能在 Xcode 的 `Info.plist`、`InfoPlist.strings`、Build Settings（`INFOPLIST_KEY_*`）、`.xcconfig` 或 `.entitlements` 中找到对应配置。Push 只检查权限配置：存在值为 `development` / `production` 的有效 `aps-environment` 或启用的 `com.apple.Push` capability 即通过，无需通知用途文案，不因扫描不到 API 而失败。未使用且未配置 Push 时不触发要求；发现 API 但缺少配置时失败。ATT 仅检查 `NSUserTrackingUsageDescription` 配置是否存在以及文案是否合理；配置存在且文案合理即通过，无需发现 ATT 请求调用。ATT-002 只检查文案非空且不是“个性化推荐 / personalized recommendations / personalized content”等通用默认推荐模板；满足即通过。不再要求达到 20 字符或包含追踪、广告、数据对象与用途动作关键词。不得仅因具体用途文案含 personalized ads 就判为默认推荐模板。未使用且未配置 ATT 时不触发要求。不会因为“声明但扫描不到 API”而失败，也不检查文案与产品主题是否匹配、ATT 请求调用、请求时机、系统弹窗、自定义授权按钮或运行时 Push 行为。
 
 `PASS` 不代表 Apple 审核一定通过。尤其是购买成功、隐私同意是否真的阻止发送，以及 iPad 布局，必须在真机或沙盒中复核；权限组本身按本节约定只做静态 API 与 Xcode 配置检查。
 

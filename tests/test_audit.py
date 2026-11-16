@@ -331,6 +331,32 @@ class AuditTests(unittest.TestCase):
             report = Auditor(root, DEFAULT_POLICY).run().report(only_failures=False)
             self.assertFalse(any(finding["id"] == "ATT-001" and finding["status"] == "FAIL" for finding in report["findings"]))
 
+    def test_microphone_is_required_without_api_and_att_can_be_absent(self) -> None:
+        for microphone in (None, "", "record", "Use the microphone to record your voice notes."):
+            with self.subTest(microphone=microphone), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "App.swift").write_text("import UIKit\n")
+                values = {} if microphone is None else {"NSMicrophoneUsageDescription": microphone}
+                (root / "Info.plist").write_bytes(plistlib.dumps(values))
+                findings = {item["id"]: item for item in Auditor(root).run().report()["findings"]}
+                self.assertEqual(findings["PERM-001"]["status"], "FAIL" if microphone is None else "PASS")
+                self.assertEqual(findings["PERM-002"]["status"],
+                                 "PASS" if microphone == "Use the microphone to record your voice notes." else "FAIL")
+                self.assertEqual(findings["ATT-001"]["status"], "PASS")
+                self.assertEqual(findings["ATT-002"]["status"], "PASS")
+
+    def test_microphone_build_setting_is_sufficient_without_api(self) -> None:
+        for suffix in (".xcconfig", ".pbxproj"):
+            with self.subTest(suffix=suffix), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path = root / ("project.pbxproj" if suffix == ".pbxproj" else "App.xcconfig")
+                path.write_text('INFOPLIST_KEY_NSMicrophoneUsageDescription = "Use the microphone to record your voice notes.";\n')
+                findings = {item["id"]: item for item in Auditor(root).run().report()["findings"]}
+                self.assertEqual(findings["PERM-001"]["status"], "PASS")
+                self.assertEqual(findings["PERM-002"]["status"], "PASS")
+                microphone = next(d for d in findings["PERM-001"]["details"] if d["label"] == "麦克风")
+                self.assertEqual(microphone["evidence"][0]["path"], path.name)
+
     def test_push_only_checks_configuration(self) -> None:
         for config_kind in ("entitlements", "capability", "missing"):
             with self.subTest(config_kind=config_kind), tempfile.TemporaryDirectory(prefix="ios-aside-review-test-") as directory:
