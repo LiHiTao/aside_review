@@ -2,17 +2,13 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
-import re
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-ICON_API_URL = "https://app-icon-similarity.lht841089214.chatgpt.site/api/check"
-TOKEN_FILE = Path.home() / ".codex" / "ios-aside-review" / "icon-api-token"
-TOKEN_ENV = "IOS_ASIDE_ICON_API_TOKEN"
+ICON_API_URL = "https://app-icon-similarity.lht841089214.chatgpt.site/api/audit"
 ICON_SIZE = 128
 THRESHOLD = 85
 MAX_RESPONSE_BYTES = 512 * 1024
@@ -25,20 +21,6 @@ class IconApiError(RuntimeError):
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
-
-
-def read_token() -> str:
-    token = os.environ.get(TOKEN_ENV)
-    if token is None:
-        try:
-            with TOKEN_FILE.open(encoding="utf-8") as stream:
-                token = stream.read(128)
-        except (OSError, UnicodeError):
-            token = ""
-    token = token.strip()
-    if not re.fullmatch(r"[a-f0-9]{40}", token):
-        raise IconApiError(f"缺少有效的图标服务分享码。请配置 {TOKEN_ENV}。")
-    return token
 
 
 def icon_pixels(path: Path) -> bytes:
@@ -56,23 +38,20 @@ def icon_pixels(path: Path) -> bytes:
         raise ValueError("图标像素数超过读取上限") from error
 
 
-def check_icon(pixels: bytes, app_name: str, token: str) -> tuple[list[dict], bool]:
+def check_icon(pixels: bytes, app_name: str) -> tuple[list[dict], bool]:
     label = " ".join(app_name.split())[:48]
     request = Request(ICON_API_URL, data=pixels, method="POST", headers={
-        "Authorization": f"Bearer {token}",
         "Content-Type": "application/octet-stream",
         "Accept": "application/json",
         "User-Agent": "ios-aside-review icon audit",
         "X-App-Name": quote(label, safe=""),
     })
     try:
-        # Never forward the share token or image in a redirect.
+        # Keep the image submission on the configured service.
         with build_opener(NoRedirect()).open(request, timeout=15) as response:
             raw = response.read(MAX_RESPONSE_BYTES + 1)
     except HTTPError as error:
         error.close()
-        if error.code in {401, 403}:
-            raise IconApiError("图标服务拒绝访问，请核对分享码。") from None
         raise IconApiError(f"图标服务返回 HTTP {error.code}，比对或入库结果待确认。") from None
     except (URLError, OSError) as error:
         raise IconApiError("图标服务不可达或响应超时，比对或入库结果待确认。") from None

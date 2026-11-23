@@ -6,10 +6,10 @@ from typing import Iterable, Mapping
 
 try:
     from .app_icon_assets import find_app_icons
-    from .icon_api import THRESHOLD, IconApiError, check_icon, icon_pixels, read_token
+    from .icon_api import THRESHOLD, IconApiError, check_icon, icon_pixels
 except ImportError:
     from app_icon_assets import find_app_icons
-    from icon_api import THRESHOLD, IconApiError, check_icon, icon_pixels, read_token
+    from icon_api import THRESHOLD, IconApiError, check_icon, icon_pixels
 
 
 def audit_app_icons(root: Path, build_sources: Mapping[Path, str], ignored: Iterable[str]) -> dict:
@@ -26,11 +26,6 @@ def audit_app_icons(root: Path, build_sources: Mapping[Path, str], ignored: Iter
     icons, issues = find_app_icons(root, build_sources, ignored)
     if not icons:
         return {**finding, "actual": "。".join(issues) or "未找到可比对的 App 主图标"}
-    try:
-        token = read_token()
-    except IconApiError as error:
-        return {**finding, "actual": str(error)}
-
     seen = set()
     matches_by_icon = []
     for icon in icons:
@@ -46,7 +41,7 @@ def audit_app_icons(root: Path, build_sources: Mapping[Path, str], ignored: Iter
             continue
         seen.add(pixels)
         try:
-            matches, added = check_icon(pixels, root.name, token)
+            matches, added = check_icon(pixels, root.name)
         except IconApiError as error:
             issues.append(f"{relative} {error}")
             continue

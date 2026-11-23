@@ -17,9 +17,6 @@ class IconAuditTests(unittest.TestCase):
         directory = Path(temporary.name)
         self.root = directory / "App"
         self.root.mkdir()
-        token = patch("scripts.icon_audit.read_token", return_value="a" * 40)
-        token.start()
-        self.addCleanup(token.stop)
 
     def icon(self, name, color):
         folder = self.root / "Assets.xcassets" / f"{name}.appiconset"
@@ -51,7 +48,7 @@ class IconAuditTests(unittest.TestCase):
         self.assertEqual(result["status"], "FAIL")
         self.assertEqual(result["evidence"][0]["path"], primary.relative_to(self.root).as_posix())
         self.assertEqual(result["details"][0]["matches"], matches)
-        request.assert_called_once_with(bytes(128 * 128 * 3), "App", "a" * 40)
+        request.assert_called_once_with(bytes(128 * 128 * 3), "App")
 
     def test_threshold_and_enrollment_status(self):
         self.icon("AppIcon", "black")
@@ -80,8 +77,6 @@ class IconAuditTests(unittest.TestCase):
         with patch("scripts.icon_audit.check_icon") as request:
             self.assertEqual(self.finding()["status"], "NOT_VERIFIABLE")
             icon = self.icon("AppIcon", "black")
-            with patch("scripts.icon_audit.read_token", side_effect=IconApiError("missing token")):
-                self.assertEqual(self.finding()["status"], "NOT_VERIFIABLE")
             icon.write_bytes(b"broken image")
             self.assertEqual(self.finding()["status"], "NOT_VERIFIABLE")
             request.assert_not_called()
@@ -115,12 +110,13 @@ class IconAuditTests(unittest.TestCase):
                 "matches": [{"name": "Reference", "score": 80, "image": "preview"}],
                 "added": True,
             }).encode()
-            self.assertEqual(check_icon(pixels, "Example App", "b" * 40),
+            self.assertEqual(check_icon(pixels, "Example App"),
                              ([{"name": "Reference", "score": 80}], True))
         request = opener.open.call_args.args[0]
         self.assertEqual(request.full_url, ICON_API_URL)
+        self.assertTrue(request.full_url.endswith("/api/audit"))
         self.assertEqual(request.get_method(), "POST")
-        self.assertEqual(request.get_header("Authorization"), "Bearer " + "b" * 40)
+        self.assertIsNone(request.get_header("Authorization"))
         self.assertEqual(request.get_header("User-agent"), "ios-aside-review icon audit")
         self.assertEqual(request.get_header("X-app-name"), "Example%20App")
         self.assertEqual(request.data, bytes([255]) * (128 * 128 * 3))
@@ -135,4 +131,4 @@ class IconAuditTests(unittest.TestCase):
                             {"matches": [{"name": "Ref", "score": 80}]}):
                 response.read.return_value = json.dumps(payload).encode()
                 with self.assertRaises(IconApiError):
-                    check_icon(bytes(128 * 128 * 3), "App", "b" * 40)
+                    check_icon(bytes(128 * 128 * 3), "App")

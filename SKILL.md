@@ -11,7 +11,7 @@ description: 用于目录结构不固定的 iOS A 面项目只读上架风险审
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.2.3`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.2.4`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -203,7 +203,7 @@ Debug 分支必须结合可解析的 Release 构建条件判断；确认 Release
 
 ## App 图标相似度（IOS-003）
 
-读取 Xcode 主图标，将 128 × 128 RGB 图标和项目目录名发给共享图标检测 API。最高分低于 85% 时通过并由服务自动入库，恰好 85% 时通过且不入库，高于 85% 时为 FAIL。配置分享链接中的 40 位分享码到环境变量 `IOS_ASIDE_ICON_API_TOKEN`，或保存到本机 `~/.codex/ios-aside-review/icon-api-token`。图标、分享码或服务不可用时为 NOT_VERIFIABLE。详见 [图标检查规则](references/rules.md#app-图标相似度ios-003)。
+读取 Xcode 主图标，将 128 × 128 RGB 图标和项目目录名发给共享图标检测 API。最高分低于 85% 时通过并由服务自动入库，恰好 85% 时通过且不入库，高于 85% 时为 FAIL。技能直接调用 `POST /api/audit`，无需配置凭证。图标或服务不可用时为 NOT_VERIFIABLE。详见 [图标检查规则](references/rules.md#app-图标相似度ios-003)。
 
 ## 判定约定
 
