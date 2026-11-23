@@ -31,6 +31,7 @@ try:
     from .legal_links import analyze_webview_usage
     from .storekit_usage import analyze_storekit_usage
     from .hidden_feature_risks import analyze_hidden_risks
+    from .icon_audit import audit_app_icons
 except ImportError:
     from update_skill import UpdateError, ensure_latest
     from restore_detection import detect_restore
@@ -42,6 +43,7 @@ except ImportError:
     from legal_links import analyze_webview_usage
     from storekit_usage import analyze_storekit_usage
     from hidden_feature_risks import analyze_hidden_risks
+    from icon_audit import audit_app_icons
 
 
 DEFAULT_POLICY: dict[str, Any] = {
@@ -259,6 +261,7 @@ RULE_ORDER = (
     "SENSITIVE-001",
     "IOS-001",
     "IOS-002",
+    "IOS-003",
 )
 
 RULE_TITLES = {
@@ -282,6 +285,7 @@ RULE_TITLES = {
     "SENSITIVE-001": "敏感词检查",
     "IOS-001": "LaunchScreen",
     "IOS-002": "App 名称",
+    "IOS-003": "App 图标相似度",
 }
 
 
@@ -854,6 +858,9 @@ class Auditor:
         self.check_privacy_manifest()
         self.check_sensitive_terms()
         self.check_launch_and_name()
+        icon_finding = audit_app_icons(self.root, self.all_texts,
+                                      IGNORED_DIRS | set(self.policy.get("ignored_paths", [])))
+        self.add(icon_finding.pop("id"), **icon_finding)
         return self
 
     def check_legal_links(self) -> None:

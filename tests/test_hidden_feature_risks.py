@@ -112,7 +112,7 @@ class HiddenRiskTests(unittest.TestCase):
             root = Path(directory)
             (root / 'App.swift').write_text('func boot() { if isReview { window.rootViewController = Tool() } }')
             report = Auditor(root).run().report()
-            self.assertEqual(len(RULE_ORDER), 20)
+            self.assertEqual(len(RULE_ORDER), 21)
             self.assertEqual(report['schema_version'], '2.0')
             finding = next(f for f in report['findings'] if f['id'] == 'REVIEW-001')
             self.assertEqual(finding['status'], 'WARN')

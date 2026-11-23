@@ -11,7 +11,7 @@ description: 用于目录结构不固定的 iOS A 面项目只读上架风险审
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.2.2`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.2.3`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -52,7 +52,7 @@ python3 scripts/audit_ios_a_side.py ./path/to/project \
 3. 检查非忽略目录中是否存在 `PrivacyInfo.xcprivacy`；A 面默认不需要该文件，发现任意一个即判定为 `FAIL` 并列出全部相对路径。
 4. 扫描源码、配置、权限文案、商店元数据和隐私文本中的敏感词；默认覆盖 AI/人工智能、Dating/交友、赌博/博彩、色情/成人内容，发现命中时聚合为一个失败项。
 5. 默认忽略 `.git`、`Pods`、`Carthage`、`build`、`DerivedData`、`.build`、`xcuserdata`、`node_modules`、`swiftshield-output` 等生成或第三方目录；策略可追加忽略目录。
-6. 先运行 `scripts/audit_ios_a_side.py`，再按 `references/rules.md` 解读证据。扫描器只读目标文件；协议检查不发送网络请求，不检测部署或可访问性。
+6. 先运行 `scripts/audit_ios_a_side.py`，再按 `references/rules.md` 解读证据。扫描器只读目标文件。图标检查使用共享 API，协议检查不发送网络请求。
 7. 输出规则表中的全部检查项。在内部审计结果中为 `FAIL` 保留相对项目根目录的文件路径、行号、实际值、期望值和修复方向；PDF 仅显示完整检查清单与结论，不直接编辑代码。用户明确要求详细证据时再按需提供。
 8. 对 `NOT_VERIFIABLE` 给出人工验证步骤，例如 StoreKit 沙盒购买和真机检查 iPad 视觉布局。相机/相册/麦克风/ATT/Push 权限不扩展检查运行时弹窗、ATT 请求时机或自定义授权按钮。
 9. 最终回复使用中文，只交付 PDF 报告并汇总四种状态；优先提示 `FAIL`、`WARN` 和 `NOT_VERIFIABLE`，PDF 完整清单不得省略 `PASS`。除非用户明确要求其它格式，不生成或交付 Markdown、JSON 报告。
@@ -111,7 +111,7 @@ IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或�
 - 完整扫描仅有明确旧版购买实现（如 SKPaymentQueue 提交付款）且无 StoreKit 2 证据为 FAIL；没有明确实现、只有导入/配置、不可读取的第三方封装或扫描不完整且无通过证据时为 NOT_VERIFIABLE。
 - 支持 Swift / Objective-C 混合工程中的 Swift 实现，不要求 Objective-C 直接出现 StoreKit 2 API；不推断二进制框架内部版本。
 
-保留文件、行号及 API 摘录，子项参与现有内购汇总。PASS 仅确认存在 StoreKit 2 API 使用，不验证购买成功、发货或完整交易流程。保持 20 项顶层清单及 schema 2.0，无网络请求、构建或运行。
+保留文件、行号及 API 摘录，子项参与现有内购汇总。PASS 仅确认存在 StoreKit 2 API 使用，不验证购买成功、发货或完整交易流程。保持 21 项顶层清单及 schema 2.0，无网络请求、构建或运行。
 
 ## WKWebView 使用检查（LEGAL-001，简化标准）
 
@@ -123,7 +123,7 @@ IAP 提交状态默认要求 `submit_for_review: true`。明确为 `false` 或�
 - 完整扫描无 WKWebView 证据为 FAIL；有 WKWebView 但无法关联加载调用为 NOT_VERIFIABLE；读取不完整且缺少通过证据时为 NOT_VERIFIABLE。
 - 不再判断协议外跳、Safari 或多入口混用。工程任意页面的 WKWebView 加载均可满足本项。
 
-不请求协议 URL，不检查部署或真机效果。PASS 仅证明工程存在 WKWebView 加载实现，不证明隐私协议、用户协议已接入，也不证明该方法实际执行。GitHub 更新检查独立保留。报告名称改为“WKWebView 使用（简化）”，保留 LEGAL-001、20 项清单及 schema 2.0，输出工程级证据，不伪造两类协议入口明细。
+不请求协议 URL，不检查部署或真机效果。PASS 仅证明工程存在 WKWebView 加载实现，不证明隐私协议、用户协议已接入，也不证明该方法实际执行。GitHub 更新检查独立保留。报告名称改为“WKWebView 使用（简化）”，保留 LEGAL-001、21 项清单及 schema 2.0，输出工程级证据，不伪造两类协议入口明细。
 
 ## A 面有效代码行数（CODE-001）
 
@@ -149,7 +149,7 @@ PDF 完整清单显示状态、有效行数、文件数和门槛。内部证据�
 
 ## 疑似无用代码与批量展开（CODE-002）
 
-完整清单 20 项，schema 2.0。只读源码扫描，与 CODE-001 使用同一 A 面范围、排除规则及有效物理行定义。
+完整清单 21 项，schema 2.0。只读源码扫描，与 CODE-001 使用同一 A 面范围、排除规则及有效物理行定义。
 
 采用保守的静态候选规则：检测带明确函数体的 Swift private/fileprivate 函数是否缺少函数体之外的引用。自身递归不作为外部使用；其它位置的同名引用保留该候选，避免借用名字判断“确定无用”。代理、协议实现、override、动态调用、@objc/@IBAction/@IBOutlet、Objective-C 运行时相关实现不据此认定无用。源码字符串、selector、storyboard/配置中的明确名称引用可保留候选，注释不作为引用。
 
@@ -167,7 +167,7 @@ PDF 完整清单显示状态、有效行数、文件数和门槛。内部证据�
 
 ## A 面源码文件数（CODE-003）
 
-默认要求源码文件数严格大于 20：20 个 FAIL，21 个 PASS。作为独立顶层项，完整清单增至 20 项，schema 2.0 不变。这是项目自定数量要求，不是 Apple 审核标准。
+默认要求源码文件数严格大于 20：20 个 FAIL，21 个 PASS。作为独立顶层项，完整清单增至 21 项，schema 2.0 不变。这是项目自定数量要求，不是 Apple 审核标准。
 
 复用 CODE-001 的 A 面范围、源码扩展名及排除规则。只统计具有至少一行有效代码的源码文件；空文件、纯注释文件、图片、storyboard、配置、文档、测试、第三方、B 面及生成文件不计入。同一文件仅计一次，范围重叠不重复计算。
 
@@ -177,7 +177,7 @@ PDF 显示有效源码文件数和要求；按需 JSON/Markdown 保留已计文�
 
 ## 5.6 隐藏功能与展示真实性风险（REVIEW-001）
 
-新增独立顶层项，完整清单 20 项，schema 2.0 不变。本项依据源码线索提示人工复核，不自动认定 Apple 违规。当前官方隐藏/未披露功能要求见 2.5.19，5.6 关注误导等开发者行为，2.3.1 涉及功能披露和准确描述：[Apple 指南](https://developer.apple.com/app-store/review/guidelines/)。
+新增独立顶层项，完整清单 21 项，schema 2.0 不变。本项依据源码线索提示人工复核，不自动认定 Apple 违规。当前官方隐藏/未披露功能要求见 2.5.19，5.6 关注误导等开发者行为，2.3.1 涉及功能披露和准确描述：[Apple 指南](https://developer.apple.com/app-store/review/guidelines/)。
 
 按可关联的语句、分支和辅助调用识别以下静态风险，避免全文件关键词共现判断：
 
@@ -200,6 +200,10 @@ Debug 分支必须结合可解析的 Release 构建条件判断；确认 Release
 - Restore（IAP-009）检查实际恢复购买代码或操作入口，不因协议、帮助说明或源码中的协议字符串提到 `Restore Purchases` 就判失败。诸如“不提供恢复购买 / does not provide Restore Purchases”只属于说明文案；同一文件或同一行存在真实恢复调用时仍须失败。`AppStore.sync()`、StoreKit 恢复交易调用及明确恢复购买按钮属于功能证据；普通数据备份恢复、交易监听和 `finish()` 不属于恢复购买。
 - LaunchScreen（IOS-001）兼容 `PBXFileSystemSynchronizedRootGroup`。配置名称、磁盘文件、同步目录到对应 target 的关联及该 target 的例外名单均可解析，且文件未被排除时，静态判定为 `PASS`。不要求逐文件 `PBXFileReference` 或 Resources 中的 `files` 条目，也不单靠 `objectVersion = 77` 判通过。
 - 同步目录必须属于配置所对应的 target；明确排除或无法解析 target、路径、构建变量等证据时不得绕过检查，仅因 pbxproj 的注释或排除名单出现 storyboard 文件名不能判通过。`NOT_VERIFIABLE` 应说明具体缺失的证据。静态通过表示资源接入证据充分，不代表已经构建或验证真机启动画面。
+
+## App 图标相似度（IOS-003）
+
+读取 Xcode 主图标，将 128 × 128 RGB 图标和项目目录名发给共享图标检测 API。最高分低于 85% 时通过并由服务自动入库，恰好 85% 时通过且不入库，高于 85% 时为 FAIL。配置分享链接中的 40 位分享码到环境变量 `IOS_ASIDE_ICON_API_TOKEN`，或保存到本机 `~/.codex/ios-aside-review/icon-api-token`。图标、分享码或服务不可用时为 NOT_VERIFIABLE。详见 [图标检查规则](references/rules.md#app-图标相似度ios-003)。
 
 ## 判定约定
 

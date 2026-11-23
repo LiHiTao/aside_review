@@ -22,7 +22,7 @@
 
 ## 疑似无用代码与批量展开（CODE-002）
 
-完整清单 20 项，schema 2.0。只读源码扫描，与 CODE-001 使用同一 A 面范围、默认排除规则及有效物理行定义。
+完整清单 21 项，schema 2.0。只读源码扫描，与 CODE-001 使用同一 A 面范围、默认排除规则及有效物理行定义。
 
 采用保守的静态候选规则：检测带明确函数体的 Swift private/fileprivate 函数是否缺少函数体之外的引用。自身递归不作为外部使用；其它位置的同名引用保留该候选，避免借用名字判断“确定无用”。代理、协议实现、override、动态调用、@objc/@IBAction/@IBOutlet、Objective-C 运行时相关实现不据此认定无用。源码字符串、selector、storyboard/配置中的明确名称引用可保留候选，注释不作为引用。
 
@@ -42,7 +42,7 @@
 
 ## A 面源码文件数（CODE-003）
 
-默认要求源码文件数严格大于 20：20 个 FAIL，21 个 PASS。作为独立顶层项，完整清单增至 20 项，schema 2.0 不变。这是项目自定数量要求，不是 Apple 审核标准。
+默认要求源码文件数严格大于 20：20 个 FAIL，21 个 PASS。作为独立顶层项，完整清单增至 21 项，schema 2.0 不变。这是项目自定数量要求，不是 Apple 审核标准。
 
 复用 CODE-001 的 A 面范围、源码扩展名及排除规则。只统计具有至少一行有效代码的源码文件；空文件、纯注释文件、图片、storyboard、配置、文档、测试、第三方、B 面及生成文件不计入。同一文件仅计一次，范围重叠不重复计算。
 
@@ -58,11 +58,11 @@ PDF 显示有效源码文件数和要求；按需 JSON/Markdown 保留已计文�
 
 只检查工程中 WKWebView 的初始化/明确类型及对应 load/loadRequest、loadHTMLString、loadFileURL 调用，支持 Swift/SwiftUI 和 Objective-C。不识别按钮、标题、协议入口或导航，不要求代理、URL 字面量、挂载、方法可达性或完整控制流。工程任意页面的真实加载实现均可满足本项，包括未关联入口的方法；注释、字符串示例和其它类型的同名方法不作为证据。
 
-不检查两类协议分别接入、外部浏览器、Safari、多入口混用或网络部署。PASS 仅证明工程存在 WKWebView 加载实现，不证明协议已接入或方法实际执行。报告保留 20 项、schema 2.0 与 LEGAL-001，使用工程级证据，不输出虚构的两类协议入口。无 LEGAL-002 或协议网络请求记录；GitHub 自动版本检查独立保留。
+不检查两类协议分别接入、外部浏览器、Safari、多入口混用或网络部署。PASS 仅证明工程存在 WKWebView 加载实现，不证明协议已接入或方法实际执行。报告保留 21 项、schema 2.0 与 LEGAL-001，使用工程级证据，不输出虚构的两类协议入口。无 LEGAL-002 或协议网络请求记录；GitHub 自动版本检查独立保留。
 
 ## 5.6 隐藏功能与展示真实性风险（REVIEW-001）
 
-新增独立顶层项，完整清单 20 项，schema 2.0 不变。本项依据源码线索提示人工复核，不自动认定 Apple 违规。当前官方隐藏/未披露功能要求见 2.5.19，5.6 关注误导等开发者行为，2.3.1 涉及功能披露和准确描述：[Apple 指南](https://developer.apple.com/app-store/review/guidelines/)。
+新增独立顶层项，完整清单 21 项，schema 2.0 不变。本项依据源码线索提示人工复核，不自动认定 Apple 违规。当前官方隐藏/未披露功能要求见 2.5.19，5.6 关注误导等开发者行为，2.3.1 涉及功能披露和准确描述：[Apple 指南](https://developer.apple.com/app-store/review/guidelines/)。
 
 按可关联的语句、分支和辅助调用识别以下静态风险，避免全文件关键词共现判断：
 
@@ -106,7 +106,7 @@ Debug 分支必须结合可解析的 Release 构建条件判断；确认 Release
 - 完整扫描仅有明确旧版购买实现（如 SKPaymentQueue 提交付款）且无 StoreKit 2 证据为 FAIL；没有明确实现、只有导入/配置、不可读取的第三方封装或扫描不完整且无通过证据时为 NOT_VERIFIABLE。
 - 支持 Swift / Objective-C 混合工程中的 Swift 实现，不要求 Objective-C 直接出现 StoreKit 2 API；不推断二进制框架内部版本。
 
-保留文件、行号及 API 摘录，子项参与现有内购汇总。PASS 仅确认存在 StoreKit 2 API 使用，不验证购买成功、发货或完整交易流程。保持 20 项顶层清单及 schema 2.0，无网络请求、构建或运行。
+保留文件、行号及 API 摘录，子项参与现有内购汇总。PASS 仅确认存在 StoreKit 2 API 使用，不验证购买成功、发货或完整交易流程。保持 21 项顶层清单及 schema 2.0，无网络请求、构建或运行。
 
 ## A/B 冲突与购买入口
 
@@ -167,10 +167,19 @@ META-003 必须复用 IAP-003 的状态和静态证据，避免同一商品提�
 |---|---|---|
 | IOS-001 | LaunchScreen | target 的 Info.plist 或构建设置没有 `UILaunchStoryboardName`，或对应 storyboard 文件缺失。 |
 | IOS-002 | App 名称 | 用户可见 `CFBundleDisplayName`、本地化名称或 App Store 名称中的 ASCII 英文字母数量少于 4 或多于 7。 |
+| IOS-003 | App 图标相似度 | 任一可识别主图标的最高参考分严格高于 85% 时为 FAIL。完整比对且最高分不超过 85% 为 PASS，低于 85% 由服务入库，证据不足时为 NOT_VERIFIABLE。 |
 
 新版 Xcode 文件夹同步工程：解析 `PBXFileSystemSynchronizedRootGroup` 的真实路径、target 的 `fileSystemSynchronizedGroups`、该 target 的构建配置和 `membershipExceptions`。启动配置、磁盘文件、所属 target、同步目录和未排除证据完整即可静态 `PASS`，即使 Resources 的 `files = ()` 为空，且没有逐文件引用。不能仅凭 `objectVersion = 77` 或工程中出现同步目录类型判通过；未关联 target、排除名单命中、路径或配置归属无法解析时保持 `NOT_VERIFIABLE` 并说明原因。同步工程不得回退到文件名字符串匹配，因为排除名单也会包含文件名。静态接入检查不替代实际构建、真机启动与视觉检查。
 
 名称检查默认只统计 `A-Z/a-z`，忽略空格、标点和数字；无法解析构建变量时标记 `NOT_VERIFIABLE`，并列出 `PRODUCT_NAME`/Bundle ID 作为辅助证据。
+
+### App 图标相似度（IOS-003）
+
+按 Xcode 的 `ASSETCATALOG_COMPILER_APPICON_NAME` 定位 `.appiconset`，优先使用默认外观的 iOS 营销图或 1024 像素通用图。存在多个明确配置的主图标时逐一检查。不同配置无法定位时保留需复核，已确认超阈值的匹配仍为 FAIL。
+
+使用现有检测站的 `POST /api/check` 比对网页和钉钉共用的图库。客户端纠正 EXIF 方向、叠加白底并缩放为 128 × 128 RGB。服务返回最多 5 个匹配和入库结果。JSON 明细记录匹配分数、参考名称及入库状态，PDF 展示最高分、参考名称、比对数与入库数。服务以入库前的匹配分返回结果。入库后再次比对同一图标会命中 100%。同一工程内完全相同的缩放图像只提交一次。
+
+将分享链接中的 40 位分享码设置为 `IOS_ASIDE_ICON_API_TOKEN`，或保存在本机 `~/.codex/ios-aside-review/icon-api-token`。载荷为缩放后的 RGB 像素和工程目录名。本地解码依赖 Pillow。未授权、请求失败或响应无法验证时标为需复核。请求超时的入库结果需要向服务核对。
 
 ## 不能静态代替的检查
 

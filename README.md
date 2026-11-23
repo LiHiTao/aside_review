@@ -2,7 +2,7 @@
 
 iOS A 面审核技能
 
-版本：**1.2.2**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
+版本：**1.2.3**。对 iOS 项目执行只读上架风险检查，默认生成中文 A4 PDF。仓库中的技能目录名为 `ios-aside-review`；GitHub 仓库名为 `aside_review`。
 
 ## 安装
 
@@ -13,7 +13,7 @@ iOS A 面审核技能
 
 安装副本不要包含 `.git`。在 Codex 中使用 `$ios-aside-review` 并指定 iOS 项目路径即可。复制到桌面的文件夹也可直接安装。
 
-需要 Python 3.10 或更新版本；PDF 需要 ReportLab 和可嵌入中文字体，验证 PDF 还需要 pypdf。Codex 优先使用 bundled Python。其它环境可运行 `python3 -m pip install reportlab pypdf`，并按 SKILL.md 配置中文字体。
+需要 Python 3.10 或更新版本。图标比对需要 Pillow，PDF 需要 ReportLab 和可嵌入中文字体，验证 PDF 还需要 pypdf。Codex 优先使用 bundled Python。其它环境可运行 `python3 -m pip install pillow reportlab pypdf`，并按 SKILL.md 配置中文字体。
 
 ## 每次执行前自动更新
 
@@ -33,7 +33,7 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 完整规则见 [SKILL.md](SKILL.md) 与 [规则参考](references/rules.md)。其中：
 
 - 5.6 隐藏功能与展示真实性风险：结合语句/分支关联检查业务切换、演示数据持久化、素材回退、模拟进度及本地成功提示；默认 WARN，不因关键词直接判违规。
-- StoreKit 2 简化检查：任一明确 API 用法即可通过，允许新旧混用；并入内购汇总，保持 20 项。不追踪完整购买流程，不把导入、注释或普通同名方法作为证据。
+- StoreKit 2 简化检查：任一明确 API 用法即可通过，允许新旧混用；并入内购汇总，保持 21 项。不追踪完整购买流程，不把导入、注释或普通同名方法作为证据。
 - WKWebView 简化检查：工程存在 WKWebView 初始化/明确类型及对应加载调用即可。不识别按钮或协议入口，不要求代理、URL、挂载或调用可达性，不联网验证；通过不证明两类协议已接入。
 - 同一档位同时含 `id` 与 `productId` 时只统计真实商品 ID，不需修改项目字段名规避重复计数。
 - 档位按商品列表原有价格顺序，从默认 $0.99 起递增判断，不要求名称或商品 ID 包含序号。
@@ -44,6 +44,7 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 - A 面有效源码必须严格超过 5000 行，排除空行和纯注释；默认直接统计传入工程，`a_side_source_paths` 缺省或 `[]` 均使用根目录，具体口径见 SKILL.md。
 - Restore 按实际代码/操作入口检查，协议中“不提供恢复购买”的说明不会因关键词误报。
 - LaunchScreen 支持新版 Xcode 文件夹同步，核对对应 target、同步目录与排除名单。
+- App 图标通过共享 API 比对。把检测站分享链接中的 40 位分享码设置为 `IOS_ASIDE_ICON_API_TOKEN`，或写入本机 `~/.codex/ios-aside-review/icon-api-token`。最高分高于 85% 为 FAIL，低于 85% 时由服务自动入库。
 - 静态通过不代表购买、交易验证或真机布局已经通过，也不保证 Apple 审核结果。
 
 ## 开发与发布
@@ -52,7 +53,7 @@ python3 ~/.codex/skills/ios-aside-review/scripts/audit_ios_a_side.py /path/to/io
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 ```
 
-测试使用模拟 GitHub 响应，协议审计禁止网络请求，不依赖公网，也不会修改已安装技能。开发者更新 `VERSION` 和发布说明后提交，再创建与版本相同的标签（例如 `v1.2.2`）。发布工作流会运行测试、核对标签与 VERSION，并创建带安装 ZIP 的正式 GitHub Release。只有 Release 发布成功后，使用者才会收到更新。
+测试使用模拟 GitHub 响应，协议审计禁止网络请求，不依赖公网，也不会修改已安装技能。开发者更新 `VERSION` 和发布说明后提交，再创建与版本相同的标签（例如 `v1.2.3`）。发布工作流会运行测试、核对标签与 VERSION，并创建带安装 ZIP 的正式 GitHub Release。只有 Release 发布成功后，使用者才会收到更新。
 
 首个发布标签为 `v1.0.0`。不要复用或移动已经发布的版本标签。
 
