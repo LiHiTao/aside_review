@@ -11,7 +11,7 @@ description: 用于目录结构不固定的 iOS A 面项目只读上架风险审
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.2.4`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.2.5`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
