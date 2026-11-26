@@ -7,7 +7,8 @@ from unittest.mock import patch
 from PIL import Image
 
 from scripts.audit_ios_a_side import Auditor
-from scripts.icon_api import ICON_API_URL, IconApiError, check_icon, icon_pixels
+from scripts.icon_api import LEGACY_ICON_API_URL, IconApiError, check_icon, icon_pixels
+from scripts.icon_audit import audit_app_icons, icon_project_key
 
 
 class IconAuditTests(unittest.TestCase):
@@ -43,20 +44,20 @@ class IconAuditTests(unittest.TestCase):
         primary = self.icon("ReleaseIcon", "black")
         (self.root / "Release.xcconfig").write_text("ASSETCATALOG_COMPILER_APPICON_NAME = ReleaseIcon\n")
         matches = [{"name": f"reference {i}", "score": 100 - i} for i in range(5)]
-        with patch("scripts.icon_audit.check_icon", return_value=(matches, False)) as request:
+        with patch("scripts.icon_audit.compare_icon", return_value=(matches, False)) as request:
             result = self.finding()
         self.assertEqual(result["status"], "FAIL")
         self.assertEqual(result["evidence"][0]["path"], primary.relative_to(self.root).as_posix())
         self.assertEqual(result["details"][0]["matches"], matches)
-        request.assert_called_once_with(bytes(128 * 128 * 3), "App")
+        request.assert_called_once_with(bytes(128 * 128 * 3), "App", icon_project_key(self.root, {}))
 
     def test_threshold_and_enrollment_status(self):
         self.icon("AppIcon", "black")
         for score, added, status in ((84.9, True, "PASS"), (85, False, "PASS"), (85.1, False, "FAIL")):
             with self.subTest(score=score), patch(
-                "scripts.icon_audit.check_icon", return_value=([{"name": "Ref", "score": score}], added)
-            ):
-                result = self.finding()
+                "scripts.icon_audit.compare_icon", return_value=([{"name": "Ref", "score": score}], False)
+            ), patch("scripts.icon_audit.enroll_icons", return_value=[added]):
+                result = audit_app_icons(self.root, {}, (), enrollment_allowed=True)
                 self.assertEqual(result["status"], status)
                 self.assertIs(result["details"][0]["added"], added)
                 self.assertIn(f"入库 {int(added)} 个", result["actual"])
@@ -68,13 +69,13 @@ class IconAuditTests(unittest.TestCase):
             "ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon\n"
             "ASSETCATALOG_COMPILER_APPICON_NAME[sdk=iphoneos*] = ReleaseIcon\n"
         )
-        with patch("scripts.icon_audit.check_icon", return_value=([{"name": "Ref", "score": 84}], True)) as request:
+        with patch("scripts.icon_audit.compare_icon", return_value=([{"name": "Ref", "score": 84}], True)) as request:
             result = self.finding()
         self.assertEqual(result["status"], "PASS")
         request.assert_called_once()
 
     def test_unavailable_prerequisites_do_not_upload(self):
-        with patch("scripts.icon_audit.check_icon") as request:
+        with patch("scripts.icon_audit.compare_icon") as request:
             self.assertEqual(self.finding()["status"], "NOT_VERIFIABLE")
             icon = self.icon("AppIcon", "black")
             icon.write_bytes(b"broken image")
@@ -83,7 +84,7 @@ class IconAuditTests(unittest.TestCase):
 
     def test_service_error_needs_review(self):
         self.icon("AppIcon", "black")
-        with patch("scripts.icon_audit.check_icon", side_effect=IconApiError("service unavailable")):
+        with patch("scripts.icon_audit.compare_icon", side_effect=IconApiError("service unavailable")):
             result = self.finding()
         self.assertEqual(result["status"], "NOT_VERIFIABLE")
         self.assertIn("service unavailable", result["actual"])
@@ -94,7 +95,7 @@ class IconAuditTests(unittest.TestCase):
         (self.root / "Debug.xcconfig").write_text("ASSETCATALOG_COMPILER_APPICON_NAME = Missing\n")
         for score, expected in ((100, "FAIL"), (85, "NOT_VERIFIABLE")):
             with self.subTest(score=score), patch(
-                "scripts.icon_audit.check_icon", return_value=([{"name": "Ref", "score": score}], False)
+                "scripts.icon_audit.compare_icon", return_value=([{"name": "Ref", "score": score}], False)
             ):
                 result = self.finding()
                 self.assertEqual(result["status"], expected)
@@ -113,7 +114,7 @@ class IconAuditTests(unittest.TestCase):
             self.assertEqual(check_icon(pixels, "Example App"),
                              ([{"name": "Reference", "score": 80}], True))
         request = opener.open.call_args.args[0]
-        self.assertEqual(request.full_url, ICON_API_URL)
+        self.assertEqual(request.full_url, LEGACY_ICON_API_URL)
         self.assertTrue(request.full_url.endswith("/api/audit"))
         self.assertEqual(request.get_method(), "POST")
         self.assertIsNone(request.get_header("Authorization"))

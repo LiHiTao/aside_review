@@ -858,8 +858,14 @@ class Auditor:
         self.check_privacy_manifest()
         self.check_sensitive_terms()
         self.check_launch_and_name()
-        icon_finding = audit_app_icons(self.root, self.all_texts,
-                                      IGNORED_DIRS | set(self.policy.get("ignored_paths", [])))
+        enrollment_allowed = all(
+            finding["status"] not in {"FAIL", "NOT_VERIFIABLE"}
+            for finding in self._normalised_findings() if finding["id"] != "IOS-003"
+        )
+        icon_finding = audit_app_icons(
+            self.root, self.all_texts, IGNORED_DIRS | set(self.policy.get("ignored_paths", [])),
+            enrollment_allowed=enrollment_allowed,
+        )
         self.add(icon_finding.pop("id"), **icon_finding)
         return self
 

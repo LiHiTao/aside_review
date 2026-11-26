@@ -11,7 +11,7 @@ description: 用于目录结构不固定的 iOS A 面项目只读上架风险审
 
 ## 版本与执行前更新
 
-当前发布版本为 `1.2.5`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
+当前发布版本为 `1.2.6`，安装版本以技能根目录 `VERSION` 为准，官方仓库为 `LiHiTao/aside_review`（公开）。每次使用本技能，必须先执行：
 
 ```bash
 python3 scripts/update_skill.py --check
@@ -203,7 +203,9 @@ Debug 分支必须结合可解析的 Release 构建条件判断；确认 Release
 
 ## App 图标相似度（IOS-003）
 
-读取 Xcode 主图标，将 128 × 128 RGB 图标和项目目录名发给共享图标检测 API。最高分低于 85% 时通过并由服务自动入库，恰好 85% 时通过且不入库，高于 85% 时为 FAIL。技能直接调用 `POST /api/audit`，无需配置凭证。图标或服务不可用时为 NOT_VERIFIABLE。详见 [图标检查规则](references/rules.md#app-图标相似度ios-003)。
+读取全部可识别的 Xcode 主图标，通过 `https://app-icon-audit.vercel.app` 的 `POST /api/audit/compare` 只读比对共享 R2 图库，提交 128 × 128 RGB 图标、项目目录名和经过 SHA-256 哈希的项目标识，无需分享码。最高分高于 85% 为 FAIL，恰好 85% 时通过且不入库。服务排除同工程入库记录作为参考，另行返回当前图像是否已在库。
+
+完成所有检查后，只有全工程没有 FAIL 或 NOT_VERIFIABLE 且所有主图标比对完整、不超过 85% 时，才通过一次 `POST /api/audit/enroll` 提交低于 85% 且未在库的图标，最多 16 个。WARN 不阻止入库。图标分数保留在报告，入库结果区分已在库、已跳过、已确认、被拒绝和待确认。请求超时或无法验证响应时需复核，409 表示参考库变化、索引未更新并需重新比对。详见 [图标检查规则](references/rules.md#app-图标相似度ios-003)。
 
 ## 判定约定
 
